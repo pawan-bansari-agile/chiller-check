@@ -1,0 +1,55 @@
+version: '3.6'
+x-logging: &my-logging
+  options:
+    max-size: '100m'
+    max-file: '2'
+services:
+  node-chiller-check:
+    # deploy:
+    #     resources:
+    #         limits:
+    #           cpus: '0.50'
+    #           memory: 512M
+    #         reservations:
+    #           cpus: '0.25'
+    #           memory: 128M
+    image: $regurl/node-chiller-check/node-chiller-check:latest
+    hostname: node-chiller-check
+    container_name: node-chiller-check
+    logging: *my-logging
+    volumes:
+      #- node-chiller-check:/wp-content/uploads //wordpress
+      - node-chiller-check:/usr/src/app/uploads
+    networks:
+      #- default
+      - node-chiller-check
+    ports:
+      - 7371:3000
+    ## aaplication .env file
+    ##env_file: /opt/ENVIRONMENT/.env
+#######################################
+# Networks: A default used by all container using bridge
+#######################################
+networks:
+  node-chiller-check:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 20.0.7.160/29
+          ip_range: 20.0.7.161/29
+          gateway: 20.0.7.161
+## Pls create project folder in /opt/DockerHomeNAS/MediaFiles/ProjectName  - using mkdir ##
+volumes:
+  node-chiller-check:
+    driver: local
+    driver_opts:
+      type: volume
+      device: /opt/DockerHomeNAS/MediaFiles/node-chiller-check
+      o: bind
+  #test:
+  #   driver: local
+  #   driver_opts:
+  #     type: volume
+  #     device: /opt/DockerHomeNAS/MediaFiles/node/src
+  #     o: bind
