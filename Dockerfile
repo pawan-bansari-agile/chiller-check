@@ -45,4 +45,5 @@ EXPOSE 3000
 ####################################
 #    Start Backend Server          #
 ####################################
-CMD ["npm", "start"]
+# CMD ["npm", "start"]
+CMD ["npm", "run", "start:prod"]
