@@ -1,4 +1,4 @@
-FROM node:18.13.0
+FROM 365269738743.dkr.ecr.eu-north-1.amazonaws.com/node-v20.14.0:latest
 
 #RUN apk --no-cache add curl
 RUN apt install curl
