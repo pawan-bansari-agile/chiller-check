@@ -37,6 +37,8 @@ RUN npm install
 COPY . /usr/src/app
 RUN rm -rf .git
 
+RUN npm run build
+
 ####################################
 #    Expose 3000 Port              #
 ####################################
