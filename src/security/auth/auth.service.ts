@@ -117,18 +117,18 @@ export class AuthService {
         deviceId: params.deviceId,
       });
 
-      // if (!existingDevice) {
-      //   // 🚀 Device not found, trigger OTP
-      //   const otpResult = await sendOTP(user.phoneNumber);
-      //   if (!otpResult.success) {
-      //     throw new Error('Failed to send OTP: ' + otpResult.error);
-      //   }
-      //   return {
-      //     userId: user._id,
-      //     otpSent: true,
-      //     message: AUTHENTICATION.OTP_SEND,
-      //   };
-      // }
+      if (!existingDevice) {
+        // 🚀 Device not found, trigger OTP
+        const otpResult = await sendOTP(user.phoneNumber);
+        if (!otpResult.success) {
+          throw new Error("Failed to send OTP: " + otpResult.error);
+        }
+        return {
+          userId: user._id,
+          otpSent: true,
+          message: AUTHENTICATION.OTP_SEND,
+        };
+      }
 
       const accessToken = await this.generateAuthToken(user);
       const cryptoEncrypt = this.cryptoService.encryptData(accessToken);
