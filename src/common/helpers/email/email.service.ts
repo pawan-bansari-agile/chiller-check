@@ -3,11 +3,11 @@ import * as nodemailer from "nodemailer";
 import * as smtpTransport from "nodemailer-smtp-transport";
 import Mail from "nodemailer/lib/mailer";
 import { AppEnvironment } from "src/common/constants/enum.constant";
-// import {
-//   SESClient,
-//   SendRawEmailCommand,
-//   SendRawEmailCommandInput,
-// } from "@aws-sdk/client-ses";
+import {
+  SESClient,
+  SendRawEmailCommand,
+  SendRawEmailCommandInput,
+} from "@aws-sdk/client-ses";
 
 interface EmailOptions {
   to: string | string[];
@@ -17,17 +17,17 @@ interface EmailOptions {
 }
 @Injectable()
 export class EmailService {
-  // private sesClient: SESClient;
+  private sesClient: SESClient;
 
   constructor() {
-    //     this.sesClient = new SESClient({
-    //       region: process.env.AWS_SES_REGION,
-    //       apiVersion: process.env.AWS_SES_API_VERSION,
-    //       credentials: {
-    //         accessKeyId: process.env.AWS_SES_ACCESS_KEY_ID,
-    //         secretAccessKey: process.env.AWS_SES_SECRET_ACCESS_KEY_ID,
-    //       },
-    //     });
+    this.sesClient = new SESClient({
+      region: process.env.AWS_SES_REGION,
+      // apiVersion: process.env.AWS_SES_API_VERSION,
+      credentials: {
+        accessKeyId: process.env.AWS_SES_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SES_SECRET_ACCESS_KEY_ID,
+      },
+    });
   }
 
   /* Send email */
@@ -38,7 +38,7 @@ export class EmailService {
       if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
         return await this.smtpMail(options);
       } else {
-        //return await this.sesMail(options);
+        return await this.sesMail(options);
       }
     } catch (e) {
       console.log("email sender func error:::::", e);
@@ -78,62 +78,62 @@ export class EmailService {
     }
   }
 
-  //   async sesMail(options: EmailOptions) {
-  //     try {
-  //       const rawEmailInput = await this.createRawEmail(options);
-  //       const sendRawEmailCommand = new SendRawEmailCommand(rawEmailInput);
-  //       await this.sesClient.send(sendRawEmailCommand);
-  //     } catch (error) {
-  //       console.error("Error sending email with SES:", error);
-  //     }
-  //   }
+  async sesMail(options: EmailOptions) {
+    try {
+      const rawEmailInput = await this.createRawEmail(options);
+      const sendRawEmailCommand = new SendRawEmailCommand(rawEmailInput);
+      await this.sesClient.send(sendRawEmailCommand);
+    } catch (error) {
+      console.error("Error sending email with SES:", error);
+    }
+  }
 
-  //   async createRawEmail(
-  //     options: EmailOptions
-  //   ): Promise<SendRawEmailCommandInput | nodemailer.SentMessageInfo> {
-  //     const boundary = "boundary_" + Date.now().toString();
-  //     const nl = "\r\n";
+  async createRawEmail(
+    options: EmailOptions,
+  ): Promise<SendRawEmailCommandInput | nodemailer.SentMessageInfo> {
+    const boundary = "boundary_" + Date.now().toString();
+    const nl = "\r\n";
 
-  //     const toAddresses = Array.isArray(options.to) ? options.to : [options.to];
+    const toAddresses = Array.isArray(options.to) ? options.to : [options.to];
 
-  //     const rawEmail =
-  //       "From: " +
-  //       process.env.AWS_SES_FROM_EMAIL +
-  //       nl +
-  //       "To: " +
-  //       toAddresses.join(", ") +
-  //       nl +
-  //       "Subject: " +
-  //       options.subject +
-  //       nl +
-  //       "Reply-To: " +
-  //       process.env.AWS_SES_FROM_EMAIL +
-  //       nl +
-  //       "MIME-Version: 1.0" +
-  //       nl +
-  //       'Content-Type: multipart/mixed; boundary="' +
-  //       boundary +
-  //       '"' +
-  //       nl +
-  //       nl +
-  //       "--" +
-  //       boundary +
-  //       nl +
-  //       "Content-Type: text/html; charset=utf-8" +
-  //       nl +
-  //       nl +
-  //       options.html +
-  //       nl +
-  //       "--" +
-  //       boundary +
-  //       "--" +
-  //       nl;
-  //     return {
-  //       Source: process.env.AWS_SES_FROM_EMAIL,
-  //       Destinations: toAddresses,
-  //       RawMessage: {
-  //         Data: Buffer.from(rawEmail),
-  //       },
-  //     };
-  //   }
+    const rawEmail =
+      "From: " +
+      process.env.AWS_SES_FROM_EMAIL +
+      nl +
+      "To: " +
+      toAddresses.join(", ") +
+      nl +
+      "Subject: " +
+      options.subject +
+      nl +
+      "Reply-To: " +
+      process.env.AWS_SES_FROM_EMAIL +
+      nl +
+      "MIME-Version: 1.0" +
+      nl +
+      'Content-Type: multipart/mixed; boundary="' +
+      boundary +
+      '"' +
+      nl +
+      nl +
+      "--" +
+      boundary +
+      nl +
+      "Content-Type: text/html; charset=utf-8" +
+      nl +
+      nl +
+      options.html +
+      nl +
+      "--" +
+      boundary +
+      "--" +
+      nl;
+    return {
+      Source: process.env.AWS_SES_FROM_EMAIL,
+      Destinations: toAddresses,
+      RawMessage: {
+        Data: Buffer.from(rawEmail),
+      },
+    };
+  }
 }

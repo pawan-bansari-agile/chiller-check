@@ -5,7 +5,7 @@ import { InjectModel } from "@nestjs/mongoose";
 import * as bcrypt from "bcrypt";
 import { compareSync, hash } from "bcrypt";
 import { Request } from "express";
-import { AppEnvironment, Role } from "src/common/constants/enum.constant";
+import { Role } from "src/common/constants/enum.constant";
 import {
   AUTHENTICATION,
   RESPONSE_ERROR,
@@ -193,12 +193,12 @@ export class AuthService {
   async verifyOtp(body: VerifyOtp) {
     try {
       const user = await this.userModel.findOne({ _id: body.userId });
-      if (process.env.APP_ENV === AppEnvironment.PRODUCTION) {
-        const otpVerifyResult = await verifyOTP(user.phoneNumber, body.otp);
-        if (!otpVerifyResult.success) {
-          throw new Error("Please enter valid OTP.");
-        }
+      // if (process.env.APP_ENV === AppEnvironment.PRODUCTION) {
+      const otpVerifyResult = await verifyOTP(user.phoneNumber, body.otp);
+      if (!otpVerifyResult.success) {
+        throw new Error("Please enter valid OTP.");
       }
+      // }
       const accessToken = await this.generateAuthToken(user);
       const cryptoEncrypt = this.cryptoService.encryptData(accessToken);
       const createDeviceObj: CreateDeviceInterface = {

@@ -118,4 +118,14 @@ export const STATES = {
   "West Virginia": "WV",
   Wisconsin: "WI",
   Wyoming: "WY",
+
+  // Federal district
+  "District of Columbia": "DC",
+
+  // U.S. territories (optional but useful for completeness)
+  "American Samoa": "AS",
+  Guam: "GU",
+  "Northern Mariana Islands": "MP",
+  "Puerto Rico": "PR",
+  "U.S. Virgin Islands": "VI",
 };
