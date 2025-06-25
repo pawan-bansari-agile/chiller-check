@@ -3,6 +3,7 @@ import mongoose, { Document } from "mongoose";
 
 import { TABLE_NAMES } from "../constants/table-name.constant";
 import { Facility } from "./facility.schema";
+import { CompanyStatus } from "../constants/enum.constant";
 
 export type CompanyDocument = Company &
   Document & { createdAt: Date; updatedAt: Date };
@@ -56,7 +57,7 @@ export class Company {
   @Prop({ default: false })
   isAssign: boolean;
 
-  @Prop({})
+  @Prop({ required: true, enum: CompanyStatus })
   status: string;
 
   // @Prop({ required: true })

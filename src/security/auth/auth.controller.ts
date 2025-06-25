@@ -22,6 +22,7 @@ import {
   ChangePasswordDto,
   ForgotPasswordDto,
   LoginDto,
+  ResendOtp,
   ResetPasswordDto,
   VerifyOtp,
 } from "../../common/dto/common.dto";
@@ -50,7 +51,15 @@ export class AuthController {
   }
 
   @Public()
-  @ResponseMessage(RESPONSE_SUCCESS.USER_LOGIN)
+  @ResponseMessage(RESPONSE_SUCCESS.USER_SEND_OTP)
+  @HttpCode(HttpStatus.OK)
+  @Post("/resendOtp")
+  async resendOtp(@Body() params: ResendOtp) {
+    return await this.authService.resendOtp(params);
+  }
+
+  @Public()
+  @ResponseMessage(RESPONSE_SUCCESS.USER_VERIFY_OTP)
   @HttpCode(HttpStatus.OK)
   @Post("/verifyOtp")
   async verifyOtp(@Body() params: VerifyOtp) {
@@ -114,7 +123,7 @@ export class AuthController {
 
   @Public()
   @Post("/resetPassword")
-  @ResponseMessage(RESPONSE_SUCCESS.SUCCESS)
+  @ResponseMessage(RESPONSE_SUCCESS.PASSWORD_RESET)
   @ApiOperation({
     summary: "User password reset Api",
     description: `

@@ -2,12 +2,17 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import mongoose, { Document } from "mongoose";
 
 import { TABLE_NAMES } from "../constants/table-name.constant";
+import { Chiller } from "./chiller.schema";
 // import { Company } from './company.schema';
 
 export type FacilityDocument = Facility &
   Document & { createdAt: Date; updatedAt: Date };
 
-@Schema({ collection: TABLE_NAMES.FACILITY, timestamps: true })
+@Schema({
+  collection: TABLE_NAMES.FACILITY,
+  timestamps: true,
+  versionKey: false,
+})
 export class Facility {
   @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "Company" })
   companyId: mongoose.Types.ObjectId;
@@ -50,6 +55,19 @@ export class Facility {
 
   @Prop({ default: 0 })
   totalOperators: number;
+
+  @Prop()
+  altitude: number;
+
+  @Prop()
+  altitudeUnit: string;
+
+  @Prop({
+    required: false,
+    type: [mongoose.Types.ObjectId],
+    ref: Chiller.name,
+  })
+  chillers: mongoose.Types.ObjectId[];
 }
 
 export const FacilitySchema = SchemaFactory.createForClass(Facility);

@@ -1,3 +1,4 @@
+import { ModulePermission } from "src/module/user/types/user.types";
 import { Role } from "../constants/enum.constant";
 
 export interface PasswordLoginInterface {
@@ -21,6 +22,7 @@ export interface UserLoginInterface {
   role: Role;
   deviceId: string;
   deviceType: string;
+  permissions?: Record<string, ModulePermission>;
 }
 
 export interface CreateDeviceInterface {

@@ -11,6 +11,19 @@ export enum Role {
   OPERATOR = "operator",
 }
 
+export enum CompanyStatus {
+  DEMO = "demo",
+  PROSPECT = "prospect",
+  ACTIVE = "active",
+  IN_ACTIVE = "inactive",
+}
+
+export enum ChillerStatus {
+  PENDING = "pending",
+  ACTIVE = "active",
+  IN_ACTIVE = "inactive",
+}
+
 export enum DeviceType {
   WEB = "web",
   IOS = "ios",
@@ -38,6 +51,21 @@ export const folderName = "chiller-check";
 export enum UploadFolderEnum {
   PROFILE_PIC = "profilePic",
 }
+
+export const ALTITUDE_UNITS = {
+  feet: "Feet",
+  meter: "Meter",
+};
+
+export const MEASUREMENT_UNITS = {
+  english: "English",
+  siMetric: "SI Metrics",
+};
+
+export const DES_INLET_WATER_TEMP = {
+  "85°F / 29.44°C": "85°F / 29.44°C",
+  "86°F / 30°C": "85°F / 29.44°C",
+};
 
 export const STATES = {
   Alabama: "AL",

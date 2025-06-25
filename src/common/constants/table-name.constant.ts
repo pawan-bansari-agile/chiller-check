@@ -5,4 +5,5 @@ export const TABLE_NAMES = {
   CMS: "cms",
   COMPANY: "company",
   FACILITY: "facility",
+  CHILLER: "chiller",
 };

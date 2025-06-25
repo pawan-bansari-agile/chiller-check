@@ -15,6 +15,7 @@ import {
   ChangePasswordDto,
   ForgotPasswordDto,
   LoginDto,
+  ResendOtp,
   ResetPasswordDto,
   VerifyOtp,
 } from "src/common/dto/common.dto";
@@ -34,6 +35,7 @@ describe("AuthController", () => {
     forgotPassword: jest.fn(),
     resetPassword: jest.fn(),
     changePassword: jest.fn(),
+    resendOtp: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -94,6 +96,16 @@ describe("AuthController", () => {
       expect(service.login).toHaveBeenCalledWith(params);
     });
   });
+  describe("resendOtp", () => {
+    it("should call authService.resendOtp with params", async () => {
+      const params: ResendOtp = {
+        userId: "1234142",
+      };
+      await controller.resendOtp(params);
+      expect(service.resendOtp).toHaveBeenCalledWith(params);
+    });
+  });
+
   describe("verifyOtp", () => {
     it("should call authService.verifyOtp with params", async () => {
       const params: VerifyOtp = {

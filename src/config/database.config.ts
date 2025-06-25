@@ -11,7 +11,7 @@ export default registerAs("database", () => ({
     lastName: "Check",
     email: "chiller.check@yopmail.com",
     password: "Admin@123",
-    phoneNumber: "7798813105",
+    phoneNumber: "9662256782",
   },
   mongo: {
     connectionString: process.env.DATABASE_CONNECTION,

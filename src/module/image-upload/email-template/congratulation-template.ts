@@ -1,86 +1,204 @@
 export const congratulationTemplate = (
   redirect_url: string,
+  role: string,
   full_name: string,
-  logo: string,
+  email: string,
 ) =>
-  `<!DOCTYPE html>
+  `
+  <!DOCTYPE html>
 <html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inter Harbour</title>
-</head>
-
-<body style="font-family: 'Inter', sans-serif;">
-    <table name="main" class="main" border="0" cellpadding="0" cellspacing="0" style="
-      width: 650px;
-      margin: 0 auto;
-      max-width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-      background-color: #FAFAFA;
-      text-align: center;
-    ">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Set Password</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body style="padding: 0; margin: 0; font-family: Roboto">
+    <table
+      style="
+        background-color: #fff;
+        width: 650px;
+        margin: 0 auto;
+        max-width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        padding: 47px 50px 28px;
+        display: block;
+      "
+    >
+      <thead>
         <tr>
-            <td>
-                <table border="0" cellpadding="0" cellspacing="0"
-                    style="width: 100%; border-collapse: collapse; table-layout: fixed">
-                    <tr>
-                        <td style="padding: 25px;">
-                            <ul style="list-style: none;background: #fff;border-radius: 24px;padding-left: 0;">
-                                <li style="width: 515px;margin: 0 auto;">
-                                    <a href="javascript:void(0)"
-                                        style="display: inline-block;padding: 30px 0 15px; max-width:300px">
-                                        <img style="width: 100%;
-                                          height: auto;
-                                          object-fit: cover;" src=${logo} alt="logo" /></a>
-                                    <p
-                                        style="font-size: 24px;line-height: 36px;font-weight: 700;padding: 0px 0 15px;color: #1D2939;">
-                                        Congratulations</p>
-                                    <div style="width: 500px;margin: 0 auto;border-bottom: 1px solid #E4E9F8;"></div>
-                                </li>
-                                <li style="width: 515px;margin: 0 auto;">
-                                    <h1 style="margin: 10px 0;font-size: 25px;color: #1D2939;">Hi, ${full_name}
-                                        </h1>
-                                    <p
-                                        style="font-size: 16px;line-height: 24px;font-weight: 500;color: rgba(0, 0, 0,0.7);">
-                                        Welcome to Instaclaus!</p>
-                                    <p
-                                        style="font-size: 16px;line-height: 24px;font-weight: 500;color: rgba(0, 0, 0,0.7);">
-                                        Please configure your account password by clicking on <strong>Set Account
-                                            Password</strong>
-                                        button given below.</p>
-                                    <a href="${redirect_url}">
-                                        <button
-                                            style="margin: 10px 0 30px;background: #1B686A;box-shadow: none;border: none;color: #fff;font-size: 16px;line-height: 24px;font-weight: 400;border-radius: 10px;padding: 13px 30px;cursor: pointer;">Set
-                                            Account Password</button></a>
-                                    <div style="width: 500px;margin: 0 auto;border-bottom: 1px solid #E4E9F8;"></div>
-                                </li>
-                                <li style="width: 515px;margin: 0 auto;">
-                                    <h2
-                                        style="list-style: none;margin-bottom: 5px; padding-bottom: 30px; font-size: 16px;font-weight: 500;line-height: 26px;color: rgba(0, 0, 0,0.7);">
-                                        Please feel free to contact us on
-                                        <a style="color: #1C7678;text-decoration: none;"
-                                            href="">support@instaclaus.com</a>
-                                    </h2>
-                                </li>
-                            </ul>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <h4 style="font-size: 16px;font-weight: 500;line-height: 26px;color: #475467;margin: 0;">
-                                Thanks,</h4>
-                            <p
-                                style="font-size: 20px;font-weight: 700;line-height: 26px;color: #1D2939;margin: 0 0 30px;">
-                                 Team Instaclaus</p>
-                        </td>
-                    </tr>
-                </table>
-            </td>
+          <td>
+            <table
+              style="
+                width: 100%;
+                border-collapse: collapse;
+                table-layout: fixed;
+              "
+            >
+              <tr>
+                <td
+                  style="
+                    vertical-align: middle;
+                    text-align: center;
+                    padding-bottom: 57px;
+                    width: 100%;
+                  "
+                >
+                  <span
+                    style="
+                      border-bottom: 1px solid #00a86b;
+                      font-weight: 500;
+                      font-size: 20px;
+                      line-height: 24px;
+                      color: rgba(0, 0, 0, 0.85);
+                      padding-bottom: 10px;
+                    "
+                    >Account Created Successfully</span
+                  >
+                </td>
+              </tr>
+            </table>
+          </td>
         </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <table
+              style="
+                vertical-align: middle;
+                width: 100%;
+                color: #333333;
+                font-weight: 400;
+                font-size: 14px;
+                line-height: 131%;
+                padding-bottom: 120px;
+              "
+            >
+              <tr>
+                <td style="padding-bottom: 20px;">Hi ${full_name},</td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">Wecome to chiller check.</td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">We are very excited to have you onboard.</td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">You have been invited to this system as a ${role}.</td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">Setup Your Password by clicking on the below button.</td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 30px;">
+                  Once your password is setup you can login into the system
+                  using your registered email <b>${email}.</b>
+                </td>
+              </tr>
+              <tr>
+                <td style="text-align: center;padding-bottom: 35px;">
+                <a href="${redirect_url}">
+                  <button
+                    style="
+                      background: #000abc;
+                      font-size: 14px;
+                      font-weight: 700;
+                      color: #fff;
+                      border-radius: 30px;
+                      padding: 6.5px 35px;
+                      border: none;
+                      cursor: pointer;
+                    "
+                  >
+                    Set Password
+                  </button>
+                  <a>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">
+                  <span
+                    >Please note that the option to set your password will
+                    expire within 24 hours.</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">
+                  <span
+                    >If the password link has expired, you can reach out to your
+                    superior to generate a new password link & share it. Else
+                    email to us at support@chillercheck.com</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>Thanks.</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>
+            <table
+              style="
+                width: 100%;
+                border-collapse: collapse;
+                table-layout: fixed;
+              "
+            >
+              <tr>
+                <td
+                  style="
+                    vertical-align: middle;
+                    text-align: center;
+                    padding-top: 30px;
+                    width: 100%;
+                  "
+                >
+                  <a href="javascript:void(0)"
+                    ><img
+                      src="${process.env.LOGO_URL}"
+                      alt="logo"
+                      style="max-width: 180px"
+                  /></a>
+                </td>
+              </tr>
+              <tr>
+                <td
+                  style="
+                    vertical-align: middle;
+                    text-align: center;
+                    padding-top: 30px;
+                    width: 100%;
+                  "
+                >
+                  <span
+                    style="
+                      font-size: 16px;
+                      font-weight: 400;
+                      line-height: 24px;
+                      color: rgba(0, 0, 0, 0.85);
+                    "
+                    >For any assistance reach out at
+                    support@chillercheck.com</span
+                  >
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </tfoot>
     </table>
-</body>
-
-</html>`;
+  </body>
+</html>
+  `;

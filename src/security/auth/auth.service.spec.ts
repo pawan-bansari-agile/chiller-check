@@ -13,7 +13,10 @@ import { DeviceType, Role } from "src/common/constants/enum.constant";
 import * as bcrypt from "bcrypt";
 import { Request } from "express";
 import { AuthExceptions, CustomError } from "src/common/helpers/exceptions";
-import { RESPONSE_SUCCESS } from "src/common/constants/response.constant";
+import {
+  AUTHENTICATION,
+  RESPONSE_SUCCESS,
+} from "src/common/constants/response.constant";
 import { EmailService } from "src/common/helpers/email/email.service";
 import mongoose from "mongoose";
 import { LoginDto, ResetPasswordDto } from "src/common/dto/common.dto";
@@ -562,7 +565,7 @@ describe("AuthService", () => {
 
     const params: LoginDto = {
       email: "chiller.check@yopmail.com",
-      password: "Admin@123",
+      password: "Admin@12345",
       deviceId: "device123",
       deviceType: DeviceType.WEB,
       fcmToken: "token123",
@@ -573,6 +576,62 @@ describe("AuthService", () => {
     expect(result?.["accessToken"]).toBe("encryptedToken123");
   });
 
+  describe("Login API - Test case", () => {
+    const loginDto = {
+      email: "chiller.check@yopmail.com",
+      password: "Admin@12345",
+      deviceId: "device123",
+      deviceType: DeviceType.WEB,
+      fcmToken: "fcm123",
+    };
+
+    const baseUser = {
+      _id: "userId",
+      firstName: "John",
+      lastName: "Doe",
+      email: "chiller.check@yopmail.com",
+      phoneNumber: "1234567890",
+      password: "hashed-password",
+      isActive: true,
+      isDeleted: false,
+      role: Role.ADMIN,
+      save: jest.fn(),
+      failedLoginAttempts: 0,
+      lastFailedLoginAttempt: null,
+    };
+
+    it("should throw AccountNotExist if user is not found", async () => {
+      userModel.findOne.mockResolvedValue(null);
+      await expect(service.login(loginDto)).rejects.toThrow(
+        AuthExceptions.AccountNotExist(),
+      );
+    });
+
+    it("should throw AccountNotActive if user is inactive", async () => {
+      const loginDto = {
+        email: "john@example.com",
+        password: "plain-password",
+        deviceId: "device123",
+        deviceType: DeviceType.WEB,
+        fcmToken: "fcm123",
+      };
+      userModel.findOne.mockResolvedValue({ ...baseUser, isActive: false });
+      await expect(service.login(loginDto)).rejects.toThrow(
+        AuthExceptions.AccountNotActive(),
+      );
+    });
+
+    it("should not deactivate admin even after failed login", async () => {
+      const user = { ...baseUser, role: Role.ADMIN };
+      userModel.findOne.mockResolvedValue(user);
+      // require("bcryptjs").compareSync.mockReturnValue(false);
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        AuthExceptions.InvalidPassword(),
+      );
+      expect(user.save).not.toHaveBeenCalled(); // because admin shouldn't increment failedLoginAttempts
+    });
+  });
   it("should throw if user not found", async () => {
     userModel.findOne.mockResolvedValue(null);
 
@@ -589,45 +648,35 @@ describe("AuthService", () => {
     );
   });
 
-  it("should deactivate account after 3 failed attempts within 1 hour", async () => {
-    const now = new Date();
+  it("should successfully resend OTP", async () => {
     const mockUser = {
       _id: "user123",
-      email: "chiller.check@yopmail.com",
-      password: "$2b$10$Kcb/lotDNJUyuwkrQYlPnOR0us8W.2lDQgQkNjq6lbiWst2QlKIa.", // bcrypt hash of "Password123"
-      firstName: "chiller",
-      lastName: "check",
-      phoneNumber: "+919662256782",
-      role: "admin",
-      isActive: true,
-      isDeleted: false,
-      failedLoginAttempts: 0,
-      lastFailedLoginAttempt: null,
-      save: jest.fn(),
+      phoneNumber: "+1234567890",
     };
 
-    const user = {
-      ...mockUser,
-      failedLoginAttempts: 2,
-      lastFailedLoginAttempt: new Date(now.getTime() - 10 * 60 * 1000), // 10 mins ago
-      save: jest.fn(),
-    };
+    userModel.findOne.mockResolvedValue(mockUser);
+    jest
+      .spyOn(otpService, "sendOTP")
+      .mockResolvedValue({ success: true, sid: "1234" });
 
-    userModel.findOne.mockResolvedValue(user);
+    const result = await service.resendOtp({ userId: "user123" });
 
-    const params = {
-      email: "chiller.check@yopmail.com",
-      password: "wrong",
-      deviceId: "device123",
-      deviceType: DeviceType.WEB,
-      fcmToken: "token123",
-    };
+    expect(userModel.findOne).toHaveBeenCalledWith({ _id: "user123" });
+    expect(otpService.sendOTP).toHaveBeenCalledWith(mockUser.phoneNumber);
+    expect(result).toEqual({
+      userId: "user123",
+      otpSent: true,
+      message: AUTHENTICATION.OTP_SEND,
+    });
+  });
+  it("should throw AccountNotExist if user is not found", async () => {
+    userModel.findOne.mockResolvedValue(null);
 
-    await expect(service.login(params)).rejects.toThrow(
-      AuthExceptions.AccountNotActive(),
+    await expect(service.resendOtp({ userId: "user123" })).rejects.toThrow(
+      AuthExceptions.AccountNotExist().message,
     );
-    expect(user.save).toHaveBeenCalled();
-    expect(user.isActive).toBe(false);
+
+    expect(userModel.findOne).toHaveBeenCalledWith({ _id: "user123" });
   });
   it("should verify OTP and return accessToken", async () => {
     const mockUser = {

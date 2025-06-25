@@ -4,11 +4,16 @@ import { Schema as MongooseSchema } from "mongoose";
 
 import { TABLE_NAMES } from "../constants/table-name.constant";
 import { Role } from "../constants/enum.constant";
+import {
+  AlertCondition,
+  LogEntryAlert,
+  ModulePermission,
+} from "src/module/user/types/user.types";
 
 export type UserDocument = User &
   Document & { createdAt: Date; updatedAt: Date };
 
-@Schema({ collection: TABLE_NAMES.USERS, timestamps: true })
+@Schema({ collection: TABLE_NAMES.USERS, timestamps: true, versionKey: false })
 export class User {
   @Prop({ required: true })
   firstName: string;
@@ -61,6 +66,18 @@ export class User {
 
   @Prop()
   lastLoginTime: Date;
+
+  @Prop({ type: mongoose.Schema.Types.Mixed })
+  permissions?: Record<string, ModulePermission>;
+
+  // @Prop({ type: [Object] })
+  // responsibilities?: Responsibility[];
+
+  @Prop({ type: [Object] })
+  alerts?: {
+    general?: AlertCondition[];
+    logs?: LogEntryAlert[];
+  };
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

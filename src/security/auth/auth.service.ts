@@ -5,8 +5,9 @@ import { InjectModel } from "@nestjs/mongoose";
 import * as bcrypt from "bcrypt";
 import { compareSync, hash } from "bcrypt";
 import { Request } from "express";
-import { Role } from "src/common/constants/enum.constant";
+import { AppEnvironment, Role } from "src/common/constants/enum.constant";
 import {
+  AUTHENTICATION,
   RESPONSE_ERROR,
   RESPONSE_SUCCESS,
   USER,
@@ -32,6 +33,7 @@ import {
   ChangePasswordDto,
   ForgotPasswordDto,
   LoginDto,
+  ResendOtp,
   ResetPasswordDto,
   VerifyOtp,
 } from "../../common/dto/common.dto";
@@ -63,6 +65,7 @@ export class AuthService {
 
   async login(params: LoginDto) {
     try {
+      console.log("params: ", params);
       const matchParams: RootFilterQuery<UserDocument> = {
         isDeleted: false,
         email: params.email,
@@ -108,24 +111,24 @@ export class AuthService {
       }
 
       // 🔍 Check if device already exists
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const existingDevice = await this.deviceModel.findOne({
         userId: user._id,
         deviceId: params.deviceId,
       });
 
-      if (!existingDevice) {
-        // 🚀 Device not found, trigger OTP
-        const otpResult = await sendOTP(user.phoneNumber);
-        if (!otpResult.success) {
-          throw new Error("Failed to send OTP: " + otpResult.error);
-        }
-        return {
-          userId: user._id,
-          otpSent: true,
-          message:
-            "OTP sent to registered phone number. Please verify to continue.",
-        };
-      }
+      // if (!existingDevice) {
+      //   // 🚀 Device not found, trigger OTP
+      //   const otpResult = await sendOTP(user.phoneNumber);
+      //   if (!otpResult.success) {
+      //     throw new Error('Failed to send OTP: ' + otpResult.error);
+      //   }
+      //   return {
+      //     userId: user._id,
+      //     otpSent: true,
+      //     message: AUTHENTICATION.OTP_SEND,
+      //   };
+      // }
 
       const accessToken = await this.generateAuthToken(user);
       const cryptoEncrypt = this.cryptoService.encryptData(accessToken);
@@ -142,6 +145,7 @@ export class AuthService {
       user.failedLoginAttempts = 0;
       user.lastFailedLoginAttempt = null;
       await user.save();
+      console.log("✌️user --->", user);
 
       const finalRes: UserLoginInterface = {
         _id: user._id,
@@ -153,7 +157,13 @@ export class AuthService {
         role: user.role,
         deviceId: params.deviceId,
         deviceType: params.deviceType,
+        profileImage: user.profileImage,
+        permissions: user.permissions,
       };
+      await this.userModel.findOneAndUpdate(
+        { _id: user._id },
+        { lastLoginTime: new Date().toISOString() },
+      );
 
       return finalRes;
     } catch (error) {
@@ -161,13 +171,33 @@ export class AuthService {
     }
   }
 
+  async resendOtp(body: ResendOtp) {
+    try {
+      const user = await this.userModel.findOne({ _id: body.userId });
+      if (!user) {
+        throw AuthExceptions.AccountNotExist();
+      }
+      const otpResult = await sendOTP(user.phoneNumber);
+      if (!otpResult.success) {
+        throw new Error("Failed to send OTP: " + otpResult.error);
+      }
+      return {
+        userId: user._id,
+        otpSent: true,
+        message: AUTHENTICATION.OTP_SEND,
+      };
+    } catch (error) {
+      throw CustomError.UnknownError(error?.message, error?.status);
+    }
+  }
   async verifyOtp(body: VerifyOtp) {
     try {
       const user = await this.userModel.findOne({ _id: body.userId });
-      console.log("user: ", user);
-      const otpVerifyResult = await verifyOTP(user.phoneNumber, body.otp);
-      if (!otpVerifyResult.success) {
-        throw new Error("Failed to Verify OTP: " + otpVerifyResult.error);
+      if (process.env.APP_ENV === AppEnvironment.PRODUCTION) {
+        const otpVerifyResult = await verifyOTP(user.phoneNumber, body.otp);
+        if (!otpVerifyResult.success) {
+          throw new Error("Please enter valid OTP.");
+        }
       }
       const accessToken = await this.generateAuthToken(user);
       const cryptoEncrypt = this.cryptoService.encryptData(accessToken);
@@ -192,8 +222,13 @@ export class AuthService {
         role: user.role,
         deviceId: body.deviceId,
         deviceType: body.deviceType,
+        profileImage: user.profileImage,
+        permissions: user.permissions,
       };
-
+      await this.userModel.findOneAndUpdate(
+        { _id: user._id },
+        { lastLoginTime: new Date().toISOString() },
+      );
       return finalRes;
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
@@ -203,6 +238,7 @@ export class AuthService {
     const payload: JwtPayload = {
       _id: user._id,
       role: user.role,
+      permissions: user.permissions,
     };
     return this.jwtService.sign(payload);
   }
@@ -251,9 +287,10 @@ export class AuthService {
           accessToken: accessToken,
         })
         .lean();
-      if (device) {
-        await this.deviceModel.deleteOne({ _id: device._id });
-      }
+      console.log("device: ", device);
+      // if (device) {
+      //   await this.deviceModel.deleteOne({ _id: device._id });
+      // }
       await this.userModel.findOne({
         _id: new mongoose.Types.ObjectId(req.user["_id"]),
       });

@@ -1,8 +1,19 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { CompanyController } from "./company.controller";
 import { CompanyService } from "./company.service";
-import { CreateCompanyDto } from "src/common/dto/common.dto";
-import { ForbiddenException } from "@nestjs/common";
+import { Request } from "express";
+import { CompanyStatus, Role } from "src/common/constants/enum.constant";
+import {
+  CompanyListDto,
+  CreateCompanyDto,
+  EditCompanyDto,
+  UpdateCompanyStatusDto,
+} from "./dto/company.dto";
+import {
+  RESPONSE_ERROR,
+  RESPONSE_SUCCESS,
+} from "src/common/constants/response.constant";
+import { TypeExceptions } from "src/common/helpers/exceptions";
 
 describe("CompanyController", () => {
   let companyController: CompanyController;
@@ -17,9 +28,11 @@ describe("CompanyController", () => {
           useValue: {
             create: jest.fn(),
             findAll: jest.fn(),
+            findAllNotDeleted: jest.fn(),
             findOne: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
+            updateCompanyStatus: jest.fn(),
           },
         },
       ],
@@ -34,200 +47,434 @@ describe("CompanyController", () => {
   });
 
   describe("create", () => {
-    it("should create a company successfully", async () => {
-      const createCompanyDto: CreateCompanyDto = {
-        name: "Test Company",
-        address1: "123 Test St",
-        address2: "Suite 100",
-        city: "Test City",
-        state: "Test State",
-        country: "Test Country",
-        zipcode: "12345",
-        website: "https://test.com",
-      };
-
-      // Mock the service's create method to return a simplified company object
-      const mockCompany = {
-        _id: "someUniqueId",
-        name: "Test Company",
-        companyCode: 123456,
-        address1: "123 Test St",
-        address2: "Suite 100",
-        city: "Test City",
-        state: "Test State",
-        country: "Test Country",
-        zipcode: "12345",
-        website: "https://test.com",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        facilities: [],
-        totalFacilities: 0,
-        totalChiller: 0,
-        isAssign: true,
-        status: "active",
-        isDeleted: false,
-      };
-
-      // Mock the service's create method to return the mock company object
-      jest
-        .spyOn(companyService, "create")
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .mockResolvedValue(mockCompany as any);
-
-      const response = await companyController.create(createCompanyDto, {
-        user: { role: "ADMIN" },
-      });
-
-      expect(response).toEqual(mockCompany); // Expecting the mocked company object as the response
-    });
-
-    it("should throw validation error if required fields are missing", async () => {
-      const createCompanyDto: CreateCompanyDto = {
-        name: "Test Company",
-        address1: "",
-        address2: "",
-        city: "",
-        state: "",
-        country: "",
-        zipcode: "",
-        website: "",
-      };
-
-      jest
-        .spyOn(companyService, "create")
-        .mockRejectedValue(new Error("Validation failed"));
-
-      try {
-        await companyController.create(createCompanyDto, {
-          user: { role: "ADMIN" },
-        });
-      } catch (e) {
-        expect(e.message).toBe("Validation failed");
-      }
-    });
-
-    it("should throw forbidden error if user is not admin", async () => {
-      const createCompanyDto: CreateCompanyDto = {
-        name: "Test Company",
-        address1: "123 Test St",
-        address2: "Suite 100",
-        city: "Test City",
-        state: "Test State",
-        country: "Test Country",
-        zipcode: "12345",
-        website: "https://test.com",
-      };
-
-      // Simulating non-admin role
-      const req = { user: { role: "USER" } };
-
-      try {
-        await companyController.create(createCompanyDto, req);
-      } catch (e) {
-        expect(e).toBeInstanceOf(ForbiddenException);
-        expect(e.message).toBe("Only Admins can create a company.");
-      }
-    });
-
-    it("should handle facility creation failure", async () => {
-      const createCompanyDto: CreateCompanyDto = {
-        name: "Test Company",
-        address1: "123 Test St",
-        address2: "Suite 100",
-        city: "Test City",
-        state: "Test State",
-        country: "Test Country",
-        zipcode: "12345",
-        website: "https://test.com",
+    it("should call companyService.create with params", async () => {
+      const params: CreateCompanyDto = {
+        name: "Test company 1",
+        address1: "string",
+        address2: "string",
+        city: "string",
+        state: "Connecticut",
+        country: "string",
+        zipcode: "string",
+        website: "string",
         facilities: [
           {
-            name: "Test Facility",
-            timezone: "",
+            name: "string",
+            address1: "string",
+            address2: "string",
+            city: "string",
+            state: "Connecticut",
+            country: "string",
+            zipcode: "string",
+            timezone: "string",
+            altitude: 0,
+            altitudeUnit: "",
           },
         ],
       };
+      const mockRequest = {
+        user: { id: "mockUserId", role: Role.ADMIN }, // Simulating user request object
+      } as unknown as Request;
 
-      jest
-        .spyOn(companyService, "create")
-        .mockRejectedValue(new Error("Facility creation failed"));
-
-      try {
-        await companyController.create(createCompanyDto, {
-          user: { role: "ADMIN" },
-        });
-      } catch (e) {
-        expect(e.message).toBe("Facility creation failed");
-      }
+      await companyController.create(params, mockRequest);
+      expect(companyService.create).toHaveBeenCalledWith(params);
     });
+  });
 
-    it("should return company without facilities if no facilities are provided", async () => {
-      const createCompanyDto: CreateCompanyDto = {
-        name: "Test Company",
-        address1: "123 Test St",
-        address2: "Suite 100",
-        city: "Test City",
-        state: "Test State",
-        country: "Test Country",
-        zipcode: "12345",
-        website: "https://test.com",
-      };
+  // describe('List', () => {
+  //   it('should call companyService.list with params', async () => {
+  //     const params: CompanyListDto = {
+  //       page: 1,
+  //       limit: 10,
+  //       search: '',
+  //       sort_order: 'ASC',
+  //       sort_by: '',
+  //     };
+  //     const mockRequest = {
+  //       user: { id: 'mockUserId', role: Role.ADMIN }, // Simulating user request object
+  //     } as unknown as Request;
 
-      const mockCompany = {
-        _id: "someUniqueId",
-        name: "Test Company",
-        companyCode: 123456,
-        address1: "123 Test St",
-        address2: "Suite 100",
-        city: "Test City",
-        state: "Test State",
-        country: "Test Country",
-        zipcode: "12345",
-        website: "https://test.com",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        facilities: [],
-        totalFacilities: 0,
-        totalChiller: 0,
-        isAssign: true,
-        status: "active",
-        isDeleted: false,
-      };
+  //     await companyController.findAll(mockRequest, params);
+  //     expect(companyService.findAll).toHaveBeenCalledWith(params);
+  //   });
+  // });
 
-      jest
-        .spyOn(companyService, "create")
+  describe("FindOne", () => {
+    it("should call companyService.findOne with params", async () => {
+      const id = "testID";
+      await companyController.findOne(id);
+      expect(companyService.findOne).toHaveBeenCalledWith(id);
+    });
+  });
+
+  // describe('FindAll active', () => {
+  //   it('should call companyService.find all with params', async () => {
+  //     await companyController.findAllNotDeleted();
+  //     expect(companyService.findAllNotDeleted).toHaveBeenCalledWith();
+  //   });
+  // });
+});
+
+describe("CompanyController - updateCompanyStatus", () => {
+  let controller: CompanyController;
+  let service: CompanyService;
+
+  const mockCompanyService = {
+    updateStatus: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [CompanyController],
+      providers: [
+        {
+          provide: CompanyService,
+          useValue: mockCompanyService,
+        },
+      ],
+    }).compile();
+
+    controller = module.get<CompanyController>(CompanyController);
+    service = module.get<CompanyService>(CompanyService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("should call service.updateStatus and return result", async () => {
+    const companyId = "mockCompanyId";
+    const body: UpdateCompanyStatusDto = {
+      status: CompanyStatus.ACTIVE,
+    };
+
+    const mockResponse = {
+      status: "success",
+      message: RESPONSE_SUCCESS.COMPANY_ACTIVATED,
+      data: {},
+    };
+
+    jest.spyOn(service, "updateStatus").mockResolvedValue(mockResponse);
+
+    const result = await controller.updateCompanyStatus(companyId, body);
+
+    expect(service.updateStatus).toHaveBeenCalledWith(companyId, body);
+    expect(result).toEqual(mockResponse);
+  });
+
+  it("should throw error if service throws", async () => {
+    const companyId = "invalidId";
+    const body: UpdateCompanyStatusDto = {
+      status: CompanyStatus.ACTIVE,
+    };
+
+    jest
+      .spyOn(service, "updateStatus")
+      .mockRejectedValue(new Error("Company Not Found"));
+
+    await expect(
+      controller.updateCompanyStatus(companyId, body),
+    ).rejects.toThrow("Company Not Found");
+  });
+});
+
+// describe('CompanyController - findAll', () => {describe('CompanyController - findAll', () => {
+let controller: CompanyController;
+let service: CompanyService;
+
+const mockCompanyService = {
+  findAll: jest.fn(),
+};
+
+beforeEach(async () => {
+  const module: TestingModule = await Test.createTestingModule({
+    controllers: [CompanyController],
+    providers: [
+      {
+        provide: CompanyService,
+        useValue: mockCompanyService,
+      },
+    ],
+  }).compile();
+
+  controller = module.get<CompanyController>(CompanyController);
+  service = module.get<CompanyService>(CompanyService);
+});
+
+afterEach(() => {
+  jest.clearAllMocks();
+});
+
+it("should return list of companies from the service", async () => {
+  const mockRequest = {
+    user: { id: "mockUserId", role: "admin" },
+  } as unknown as Request;
+
+  const mockBody: CompanyListDto = {
+    page: 1,
+    limit: 10,
+    search: "",
+    sort_by: "",
+    sort_order: "ASC",
+  };
+
+  const mockResult = {
+    companyList: [
+      { name: "TestCo", address: "Line1, Line2, City, ST, Country" },
+    ],
+    totalRecords: 1,
+  };
+
+  mockCompanyService.findAll.mockResolvedValue(mockResult);
+
+  const result = await controller.findAll(mockRequest, mockBody);
+
+  expect(service.findAll).toHaveBeenCalledWith(mockRequest, mockBody);
+  expect(result).toEqual(mockResult);
+});
+
+it("should throw an error if service fails", async () => {
+  const mockRequest = {} as Request;
+  const mockBody: CompanyListDto = {
+    page: 1,
+    limit: 5,
+    search: "fail",
+    sort_by: "",
+    sort_order: "DESC",
+  };
+
+  mockCompanyService.findAll.mockRejectedValue(
+    new Error("Internal Server Error"),
+  );
+
+  await expect(controller.findAll(mockRequest, mockBody)).rejects.toThrow(
+    "Internal Server Error",
+  );
+});
+
+describe("CompanyController - findAllNotDeleted", () => {
+  let controller: CompanyController;
+  let service: CompanyService;
+
+  const mockCompanyService = {
+    findAllNotDeleted: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [CompanyController],
+      providers: [
+        {
+          provide: CompanyService,
+          useValue: mockCompanyService,
+        },
+      ],
+    }).compile();
+
+    controller = module.get<CompanyController>(CompanyController);
+    service = module.get<CompanyService>(CompanyService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("should call service.findAllNotDeleted and return company list", async () => {
+    const mockCompanies = [
+      { _id: "1", name: "Company A", isDeleted: false },
+      { _id: "2", name: "Company B", isDeleted: false },
+    ];
+
+    mockCompanyService.findAllNotDeleted.mockResolvedValue(mockCompanies);
+
+    const result = await controller.findAllNotDeleted();
+
+    expect(service.findAllNotDeleted).toHaveBeenCalled();
+    expect(result).toEqual(mockCompanies);
+  });
+
+  it("should throw error if service.findAllNotDeleted throws", async () => {
+    mockCompanyService.findAllNotDeleted.mockRejectedValue(
+      new Error("Database error"),
+    );
+
+    await expect(controller.findAllNotDeleted()).rejects.toThrow(
+      "Database error",
+    );
+  });
+});
+
+describe("CompanyController - findAll", () => {
+  let controller: CompanyController;
+  let service: CompanyService;
+
+  const mockCompanyService = {
+    findAll: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [CompanyController],
+      providers: [
+        {
+          provide: CompanyService,
+          useValue: mockCompanyService,
+        },
+      ],
+    }).compile();
+
+    controller = module.get<CompanyController>(CompanyController);
+    service = module.get<CompanyService>(CompanyService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("should return list of companies from the service", async () => {
+    const mockRequest = {
+      user: { id: "mockUserId", role: "admin" },
+    } as unknown as Request;
+
+    const mockBody: CompanyListDto = {
+      page: 1,
+      limit: 10,
+      search: "",
+      sort_by: "",
+      sort_order: "ASC",
+    };
+
+    const mockResult = {
+      companyList: [
+        { name: "TestCo", address: "Line1, Line2, City, ST, Country" },
+      ],
+      totalRecords: 1,
+    };
+
+    mockCompanyService.findAll.mockResolvedValue(mockResult);
+
+    const result = await controller.findAll(mockRequest, mockBody);
+
+    expect(service.findAll).toHaveBeenCalledWith(mockRequest, mockBody);
+    expect(result).toEqual(mockResult);
+  });
+
+  it("should throw an error if service fails", async () => {
+    const mockRequest = {} as Request;
+    const mockBody: CompanyListDto = {
+      page: 1,
+      limit: 5,
+      search: "fail",
+      sort_by: "",
+      sort_order: "DESC",
+    };
+
+    mockCompanyService.findAll.mockRejectedValue(
+      new Error("Internal Server Error"),
+    );
+
+    await expect(controller.findAll(mockRequest, mockBody)).rejects.toThrow(
+      "Internal Server Error",
+    );
+  });
+});
+
+describe("CompanyController - updateCompany()", () => {
+  let controller: CompanyController;
+  let service: CompanyService;
+
+  const mockCompanyService = {
+    updateCompany: jest.fn(),
+  };
+
+  const updateDto: EditCompanyDto = {
+    name: "Updated Company",
+    address1: "New Addr 1",
+    address2: "New Addr 2",
+    city: "New York",
+    state: "NY",
+    country: "USA",
+    zipcode: "10001",
+    website: "https://updated.com",
+    facilities: [],
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [CompanyController],
+      providers: [{ provide: CompanyService, useValue: mockCompanyService }],
+    }).compile();
+
+    controller = module.get<CompanyController>(CompanyController);
+    service = module.get<CompanyService>(CompanyService);
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("should successfully update a company", async () => {
+    mockCompanyService.updateCompany.mockResolvedValue({});
+
+    const result = await controller.updateCompany("company123", updateDto);
+
+    expect(service.updateCompany).toHaveBeenCalledWith("company123", updateDto);
+    expect(result).toEqual({});
+  });
+
+  it("should fail if company not found", async () => {
+    mockCompanyService.updateCompany.mockRejectedValue(
+      TypeExceptions.BadRequestCommonFunction(RESPONSE_ERROR.COMPANY_NOT_FOUND),
+    );
+
+    await expect(
+      controller.updateCompany("invalid-id", updateDto),
+    ).rejects.toThrow(RESPONSE_ERROR.COMPANY_NOT_FOUND);
+  });
+
+  it("should fail if company name already exists", async () => {
+    mockCompanyService.updateCompany.mockRejectedValue(
+      TypeExceptions.BadRequestCommonFunction(
+        RESPONSE_ERROR.COMPANY_ALREADY_EXISTS,
+      ),
+    );
+
+    await expect(
+      controller.updateCompany("company123", updateDto),
+    ).rejects.toThrow(RESPONSE_ERROR.COMPANY_ALREADY_EXISTS);
+  });
+
+  it("should fail if duplicate facility names exist in payload", async () => {
+    const dtoWithDuplicates = {
+      ...updateDto,
+      facilities: [
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .mockResolvedValue(mockCompany as any);
+        { name: "Facility 1" } as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        { name: "Facility 1" } as any,
+      ],
+    };
 
-      const response = await companyController.create(createCompanyDto, {
-        user: { role: "ADMIN" },
-      });
+    mockCompanyService.updateCompany.mockRejectedValue(
+      TypeExceptions.BadRequestCommonFunction(
+        RESPONSE_ERROR.DUPLICATE_FACILITY_NAMES_IN_PAYLOAD,
+      ),
+    );
 
-      expect(response).toEqual(mockCompany); // Expecting the mocked company object as the response
-    });
+    await expect(
+      controller.updateCompany("company123", dtoWithDuplicates),
+    ).rejects.toThrow(RESPONSE_ERROR.DUPLICATE_FACILITY_NAMES_IN_PAYLOAD);
+  });
 
-    it("should handle database save failure", async () => {
-      const createCompanyDto: CreateCompanyDto = {
-        name: "Test Company",
-        address1: "123 Test St",
-        address2: "Suite 100",
-        city: "Test City",
-        state: "Test State",
-        country: "Test Country",
-        zipcode: "12345",
-        website: "https://test.com",
-      };
+  it("should fail if facility name already exists in DB", async () => {
+    mockCompanyService.updateCompany.mockRejectedValue(
+      TypeExceptions.BadRequestCommonFunction(
+        RESPONSE_ERROR.FACILITY_NAME_EXISTS,
+      ),
+    );
 
-      jest
-        .spyOn(companyService, "create")
-        .mockRejectedValue(new Error("Database save failed"));
-
-      try {
-        await companyController.create(createCompanyDto, {
-          user: { role: "ADMIN" },
-        });
-      } catch (e) {
-        expect(e.message).toBe("Database save failed");
-      }
-    });
+    await expect(
+      controller.updateCompany("company123", updateDto),
+    ).rejects.toThrow(RESPONSE_ERROR.FACILITY_NAME_EXISTS);
   });
 });

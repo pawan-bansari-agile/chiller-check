@@ -15,6 +15,16 @@ export const AuthExceptions = {
       HttpStatus.FORBIDDEN,
     );
   },
+  CMSNotFound(): HttpException {
+    return new HttpException(
+      {
+        message: "CMS not found",
+        error: "cmsNotFound",
+        statusCode: HttpStatus.BAD_REQUEST,
+      },
+      HttpStatus.BAD_REQUEST,
+    );
+  },
 
   chooseFile() {
     return new HttpException(
@@ -63,7 +73,7 @@ export const AuthExceptions = {
   InvalidPassword(): HttpException {
     return new HttpException(
       {
-        message: "Invalid login details",
+        message: "Please enter valid email or password.",
         error: "InvalidPassword",
         statusCode: HttpStatus.BAD_REQUEST,
       },

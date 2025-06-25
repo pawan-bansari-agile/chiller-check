@@ -27,7 +27,7 @@ import { CommonService } from "src/common/services/common.service";
 export class ImageUploadService {
   s3 = new S3Client({
     region: process.env.S3_REGION,
-    endpoint: process.env.S3_ENDPOINT,
+    // endpoint: process.env.S3_ENDPOINT,
     credentials: {
       accessKeyId: process.env.S3_ACCESS_KEY_ID,
       secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
@@ -100,7 +100,6 @@ export class ImageUploadService {
         CopySource: bucketS3 + "/" + sourceKey,
         Key: destinationKey,
       };
-
       await this.s3.send(
         new CopyObjectCommand(copyParams),
         async (error, data) => {
@@ -226,8 +225,8 @@ export class ImageUploadService {
         // apiVersion: process.env.API_VERSION,
         region: process.env.S3_REGION, // Your region will need to be updated
         credentials: {
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_ID,
+          accessKeyId: process.env.SES_ACCESS_KEY_ID,
+          secretAccessKey: process.env.SES_SECRET_ACCESS_KEY_ID,
         },
       });
 
@@ -356,8 +355,8 @@ export class ImageUploadService {
   async uploadS3(file, name, moduleName, mimetype) {
     try {
       const params = {
-        Bucket: process.env.S3_TEMP_BUCKETS,
-        Key: `${moduleName}/` + String(name),
+        Bucket: this.bucketS3,
+        Key: `${tmpFolderName}/${moduleName}/` + String(name),
         Body: file,
         CacheControl: "public, max-age=31557600",
         ContentType: mimetype ? mimetype : "image/jpeg", // Set the content type

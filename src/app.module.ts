@@ -20,6 +20,9 @@ import { Device, DeviceSchema } from "./common/schema/device.schema";
 import { UserModule } from "./module/user/user.module";
 import { ImageUploadModule } from "./module/image-upload/image-upload.module";
 import { CompanyModule } from "./module/company/company.module";
+import { FacilityModule } from "./module/facility/facility.module";
+import { CmsModule } from "./module/cms/cms.module";
+import { UserAccessGuard } from "./security/auth/guards/user-module.guard";
 
 @Module({
   imports: [
@@ -39,6 +42,8 @@ import { CompanyModule } from "./module/company/company.module";
     UserModule,
     ImageUploadModule,
     CompanyModule,
+    FacilityModule,
+    CmsModule,
   ],
   providers: [
     {
@@ -56,6 +61,10 @@ import { CompanyModule } from "./module/company/company.module";
     {
       provide: APP_INTERCEPTOR,
       useClass: TransformInterceptor,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: UserAccessGuard,
     },
     CryptoService,
   ],

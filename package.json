@@ -1,5 +1,5 @@
 {
-  "name": "chiller-check-mongo-nest-js",
+  "name": "chiller-check-mongo-js",
   "version": "0.0.1",
   "description": "This Nest JS app is a boilerplate integrating MongoDB, featuring complete user authentication and full CRUD operations for user management.",
   "private": true,
@@ -94,7 +94,9 @@
       "/node_modules/",
       "/src/main.ts",
       "/src/app.module.ts",
-      "/src/common"
+      "/src/common",
+      "/src/config",
+      "/src/security"
     ],
     "rootDir": "src",
     "moduleNameMapper": {

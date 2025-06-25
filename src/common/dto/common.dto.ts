@@ -1,12 +1,13 @@
-import { ApiProperty, PartialType } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional, PartialType } from "@nestjs/swagger";
 import {
-  IsArray,
+  // IsArray,
   IsDateString,
   IsEmail,
   IsEnum,
   IsIn,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsPhoneNumber,
   IsString,
@@ -14,10 +15,21 @@ import {
   ValidateIf,
   ValidateNested,
 } from "class-validator";
-import { DeviceType, Role, STATES } from "../constants/enum.constant";
+import {
+  DES_INLET_WATER_TEMP,
+  DeviceType,
+  MEASUREMENT_UNITS,
+  Role,
+} from "../constants/enum.constant";
 import { AUTHENTICATION } from "../constants/response.constant";
 import { PASSWORD_REGEX } from "../services/common.service";
 import { Type } from "class-transformer";
+import {
+  AlertSettings,
+  IsModulePermissionObject,
+  // Responsibility,
+} from "src/module/user/dto/user.dto";
+import { ModuleName, ModulePermission } from "src/module/user/types/user.types";
 
 export class LoginDto {
   @ApiProperty({ default: "chiller.check@yopmail.com" })
@@ -44,6 +56,11 @@ export class LoginDto {
   @IsNotEmpty()
   @IsEnum(DeviceType)
   deviceType: DeviceType;
+}
+export class ResendOtp {
+  @ApiProperty({})
+  @IsNotEmpty()
+  userId: string;
 }
 export class VerifyOtp {
   @ApiProperty({})
@@ -202,103 +219,233 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   profileImage?: string;
-}
 
-export class CreateFacilityDTO {
-  @ApiProperty({ description: "The name of the facility" })
-  @IsNotEmpty()
-  @IsString()
-  name: string;
-
-  @ApiProperty({ description: "Address line 1 of the facility" })
-  @IsOptional()
-  @IsString()
-  address1?: string;
-
-  @ApiProperty({ description: "Address line 2 of the facility" })
-  @IsOptional()
-  @IsString()
-  address2?: string;
-
-  @ApiProperty({ description: "City where the facility is located" })
-  @IsOptional()
-  @IsString()
-  city?: string;
-
-  @ApiProperty({ description: "State where the facility is located" })
-  @IsOptional()
-  @IsString()
-  @IsIn(Object.keys(STATES))
-  state?: string;
-
-  @ApiProperty({ description: "Country where the facility is located" })
-  @IsOptional()
-  @IsString()
-  country?: string;
-
-  @ApiProperty({ description: "Zipcode of the facility" })
-  @IsOptional()
-  @IsString()
-  zipcode?: string;
-
-  @ApiProperty({ description: "Timezone of the facility" })
-  @IsNotEmpty()
-  @IsString()
-  timezone: string;
-}
-
-export class CreateCompanyDto {
-  @ApiProperty({ description: "The name of the company" })
-  @IsNotEmpty()
-  @IsString()
-  name: string;
-
-  @ApiProperty({ description: "Address line 1 of the company" })
-  @IsNotEmpty()
-  @IsString()
-  address1: string;
-
-  @ApiProperty({ description: "Address line 2 of the company" })
-  @IsNotEmpty()
-  @IsString()
-  address2: string;
-
-  @ApiProperty({ description: "City where the company is located" })
-  @IsNotEmpty()
-  @IsString()
-  city: string;
-
-  @ApiProperty({ description: "State where the company is located" })
-  @IsNotEmpty()
-  @IsString()
-  @IsIn(Object.keys(STATES))
-  state: string;
-
-  @ApiProperty({ description: "Country where the company is located" })
-  @IsNotEmpty()
-  @IsString()
-  country: string;
-
-  @ApiProperty({ description: "Zipcode of the company" })
-  @IsNotEmpty()
-  @IsString()
-  zipcode: string;
-
-  @ApiProperty({ description: "Company's website" })
-  @IsNotEmpty()
-  @IsString()
-  website: string;
-
-  @ApiProperty({
-    description: "An array of facilities linked to the company (optional)",
-    type: [CreateFacilityDTO],
-    required: false,
+  @ApiPropertyOptional({
+    type: Object,
+    example: {
+      facility: { view: true, add: true, edit: true, toggleStatus: true },
+      users: { view: true, add: false, edit: true, toggleStatus: false },
+    },
   })
   @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CreateFacilityDTO)
-  facilities?: CreateFacilityDTO[];
+  @IsObject()
+  @IsModulePermissionObject()
+  permissions?: Record<
+    ModuleName,
+    // { view?: boolean; add?: boolean; edit?: boolean; toggleStatus?: boolean }
+    ModulePermission
+  >;
+
+  // @ApiPropertyOptional({
+  //   type: [Responsibility],
+  // })
+  // @IsOptional()
+  // @IsArray()
+  // @ValidateNested({ each: true })
+  // @Type(() => Responsibility)
+  // responsibilities?: Responsibility[];
+
+  @ApiPropertyOptional({
+    description: "Alert configuration",
+    example: {
+      general: [
+        {
+          metric: "Outside Air Temp",
+          warning: { operator: ">=", threshold: 30 },
+          alert: { operator: ">=", threshold: 40 },
+          notifyBy: "email",
+        },
+      ],
+      logs: [
+        {
+          type: "manual",
+          daysSince: 5,
+          notifyBy: "both",
+        },
+      ],
+    },
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AlertSettings)
+  alerts?: AlertSettings;
 }
 
-export class UpdateCompanyDto extends PartialType(CreateCompanyDto) {}
+export class CreateChillerDTO {
+  @ApiProperty({ description: "The ID Of the company" })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
+
+  // @ApiProperty({ description: 'Chiller Type' })
+  // @IsOptional()
+  // @IsString()
+  // type?: string;
+
+  @ApiProperty({ description: "Measurement Unit the chiller is set to use." })
+  @IsNotEmpty()
+  @IsString()
+  @IsIn(Object.keys(MEASUREMENT_UNITS))
+  unit: string;
+
+  @ApiProperty({ description: "Chiller name or number" })
+  @IsNotEmpty()
+  @IsString()
+  name: string;
+
+  @ApiProperty({
+    description: "Number of hours in a week the chiller will be working",
+  })
+  @IsNotEmpty()
+  @IsNumber()
+  weeklyHours: number;
+
+  @ApiProperty({ description: "Number of weeks per year" })
+  @IsNotEmpty()
+  @IsNumber()
+  weeksPerYear: number;
+
+  @ApiProperty({ description: "Average load profile of a chiller" })
+  @IsNotEmpty()
+  @IsNumber()
+  avgLoadProfile: number;
+
+  @ApiProperty({ description: "Design Inlet Water Temperature" })
+  @IsNotEmpty()
+  @IsString()
+  @IsIn(Object.keys(DES_INLET_WATER_TEMP))
+  desInletWaterTemp: string;
+
+  @ApiProperty({ description: "Make of Chiller" })
+  @IsNotEmpty()
+  @IsNumber()
+  make: number;
+
+  @ApiProperty({ description: "Chiller Model" })
+  @IsNotEmpty()
+  @IsString()
+  model: string;
+
+  @ApiProperty({ description: "Chiller Serial Number" })
+  @IsNotEmpty()
+  @IsNumber()
+  serialNumber: number;
+
+  @ApiProperty({ description: "Chiller Manufactured Year" })
+  @IsNotEmpty()
+  @IsNumber()
+  manufacturedYear: number;
+
+  @ApiProperty({ description: "Chiller Refrigerant Type" })
+  @IsNotEmpty()
+  @IsString()
+  refrigType: string;
+
+  @ApiProperty({ description: "Chiller capacity in Tons" })
+  @IsNotEmpty()
+  @IsNumber()
+  tons: number;
+
+  @ApiProperty({ description: "Chiller Efficiency Rating" })
+  @IsNotEmpty()
+  @IsNumber()
+  efficiencyRating: number;
+
+  @ApiProperty({ description: "Chiller Energy Cost" })
+  @IsNotEmpty()
+  @IsNumber()
+  energyCost: number;
+}
+
+export class UpdateChillerDto extends PartialType(CreateChillerDTO) {}
+
+export class CreateChillerWithFacilityDTO {
+  // @ApiProperty({ description: 'The ID Of the company' })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
+
+  // @ApiProperty({ description: 'Chiller Type' })
+  // @IsOptional()
+  // @IsString()
+  // type?: string;
+
+  @ApiProperty({ description: "Measurement Unit the chiller is set to use." })
+  @IsNotEmpty()
+  @IsString()
+  @IsIn(Object.keys(MEASUREMENT_UNITS))
+  unit: string;
+
+  @ApiProperty({ description: "Chiller name or number" })
+  @IsNotEmpty()
+  @IsString()
+  name: string;
+
+  @ApiProperty({
+    description: "Number of hours in a week the chiller will be working",
+  })
+  @IsNotEmpty()
+  @IsNumber()
+  weeklyHours: number;
+
+  @ApiProperty({ description: "Number of weeks per year" })
+  @IsNotEmpty()
+  @IsNumber()
+  weeksPerYear: number;
+
+  @ApiProperty({ description: "Average load profile of a chiller" })
+  @IsNotEmpty()
+  @IsNumber()
+  avgLoadProfile: number;
+
+  // @ApiProperty({ description: "Design Inlet Water Temperature" })
+  // @IsNotEmpty()
+  // @IsString()
+  // @IsIn(Object.keys(DES_INLET_WATER_TEMP))
+  // desInletWaterTemp: string;
+
+  @ApiProperty({ description: "Make of Chiller" })
+  @IsNotEmpty()
+  @IsNumber()
+  make: number;
+
+  @ApiProperty({ description: "Chiller Model" })
+  @IsNotEmpty()
+  @IsString()
+  model: string;
+
+  @ApiProperty({ description: "Chiller Serial Number" })
+  @IsNotEmpty()
+  @IsString()
+  serialNumber: string;
+
+  @ApiProperty({ description: "Chiller Manufactured Year" })
+  @IsNotEmpty()
+  @IsNumber()
+  manufacturedYear: number;
+
+  @ApiProperty({ description: "Chiller Refrigerant Type" })
+  @IsNotEmpty()
+  @IsString()
+  refrigType: string;
+
+  @ApiProperty({ description: "Chiller capacity in Tons" })
+  @IsOptional()
+  @IsNumber()
+  tons: number;
+
+  @ApiProperty({ description: "Chiller capacity in KWR" })
+  @IsOptional()
+  @IsNumber()
+  kwr: number;
+
+  // @ApiProperty({ description: "Chiller Efficiency Rating" })
+  // @IsNotEmpty()
+  // @IsNumber()
+  // efficiencyRating: number;
+
+  @ApiProperty({ description: "Chiller Energy Cost" })
+  @IsNotEmpty()
+  @IsNumber()
+  energyCost: number;
+}

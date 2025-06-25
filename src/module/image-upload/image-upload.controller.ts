@@ -14,11 +14,13 @@ import { diskStorage } from "multer";
 import * as fs from "fs";
 import { ResponseMessage } from "src/common/decorators/response.decorator";
 import { RESPONSE_SUCCESS } from "src/common/constants/response.constant";
+import { Public } from "src/security/auth/auth.decorator";
 @Controller("")
 @ApiTags("Common - Image upload")
 export class ImageUploadController {
   constructor(private readonly imageUploadService: ImageUploadService) {}
 
+  @Public()
   @Post("uploadMultipleFile")
   @ApiConsumes("multipart/form-data")
   @ResponseMessage(RESPONSE_SUCCESS.SUCCESS)
@@ -52,7 +54,7 @@ export class ImageUploadController {
     );
     // Delete local files after successful upload
     files.forEach((file) => {
-      fs.unlinkSync(`./uploads/${file.filename}`);
+      fs.unlinkSync(`./media/allFiles/${file.filename}`);
     });
     return result;
   }
