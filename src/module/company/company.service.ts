@@ -19,6 +19,10 @@ import { CompanyStatus } from "src/common/constants/enum.constant";
 import { TABLE_NAMES } from "src/common/constants/table-name.constant";
 import { Chiller } from "src/common/schema/chiller.schema";
 
+function escapeRegex(str: string) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 @Injectable()
 export class CompanyService {
   constructor(
@@ -33,8 +37,15 @@ export class CompanyService {
   async create(createCompanyDto: CreateCompanyDto) {
     // Step 1: Check if the company with the same name already exists
     try {
+      // const existingCompany = await this.companyModel.findOne({
+      //   name: createCompanyDto.name,
+      // });
+
       const existingCompany = await this.companyModel.findOne({
-        name: createCompanyDto.name,
+        name: {
+          $regex: `^${escapeRegex(createCompanyDto.name)}$`,
+          $options: "i",
+        },
       });
 
       if (existingCompany) {

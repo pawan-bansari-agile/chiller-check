@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   ValidateNested,
 } from "class-validator";
 import { CompanyStatus, STATES } from "../../../common/constants/enum.constant";
@@ -82,6 +83,7 @@ export class CreateCompanyDto {
   @ApiProperty({ description: "Company's website" })
   @IsNotEmpty()
   @IsString()
+  @IsUrl({}, { message: "Website must be a valid URL" })
   website: string;
 
   @ApiProperty({

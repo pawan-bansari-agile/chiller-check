@@ -122,7 +122,7 @@ export class Chiller {
   evapAPDropUnit: string;
 
   @Prop()
-  evapApproach: string;
+  evapApproach: number;
 
   @Prop()
   evapDOWTemp: number;
@@ -140,13 +140,13 @@ export class Chiller {
   maxPurgeTime: number;
 
   @Prop()
-  purgeReadingUnit: boolean;
+  purgeReadingUnit: string;
 
   @Prop()
-  haveBearingTemp: boolean;
+  haveBearingTemp: string;
 
   @Prop()
-  useRunHours: boolean;
+  useRunHours: string;
 
   @Prop({ type: mongoose.Types.ObjectId, ref: "User" })
   updatedBy: string;
@@ -164,13 +164,13 @@ export class Chiller {
   condDesignDeltaT: string;
 
   @Prop()
-  condDesignFlow: string;
+  condDesignFlow: number;
 
   @Prop()
-  evapDesignDeltaT: string;
+  evapDesignDeltaT: number;
 
   @Prop()
-  evapDesignFlow: string;
+  evapDesignFlow: number;
 
   @Prop()
   numberOfCompressors: number;

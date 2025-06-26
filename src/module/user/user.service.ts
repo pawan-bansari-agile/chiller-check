@@ -281,6 +281,7 @@ export class UserService {
 
           await this.imageUploadService.deleteImage(oldFileKey);
         }
+        user.profileImage = profileImage;
       }
 
       // Filter out fields with undefined or empty values
@@ -307,7 +308,7 @@ export class UserService {
       if (firstName) user.firstName = firstName;
       if (lastName) user.lastName = lastName;
       if (phoneNumber) user.phoneNumber = phoneNumber;
-      if (profileImage) user.profileImage = profileImage;
+      // if (profileImage) user.profileImage = profileImage;
 
       console.log("✌️user --->", user);
       await user.save();

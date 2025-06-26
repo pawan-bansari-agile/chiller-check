@@ -17,10 +17,7 @@ import {
   UpdateFacilityDto,
   UpdateFacilityStatusDto,
 } from "./dto/facility.dto";
-import {
-  // CreateChillerDTO,
-  CreateChillerWithFacilityDTO,
-} from "src/common/dto/common.dto";
+import { CreateChillerWithFacilityDTO } from "../chiller/dto/chiller.dto";
 
 @Injectable()
 export class FacilityService {

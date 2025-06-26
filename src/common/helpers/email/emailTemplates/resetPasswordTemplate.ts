@@ -139,7 +139,7 @@ export const resetPasswordTemplate = (
                     <table style="border: 0;border-spacing:0;">
                         <tr>
                             <td style="font-weight: 600;font-size: 17px;color: #404040;line-height: 23px;">Thanks, <span
-                                    style="display: block;">The Chiller Check Team</span></td>
+                                    style="display: block;">The Chiller check Team</span></td>
                         </tr>
                     </table>
                 </td>

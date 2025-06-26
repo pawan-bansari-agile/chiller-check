@@ -1,10 +1,9 @@
-import { ApiProperty, ApiPropertyOptional, PartialType } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
   // IsArray,
   IsDateString,
   IsEmail,
   IsEnum,
-  IsIn,
   IsNotEmpty,
   IsNumber,
   IsObject,
@@ -15,12 +14,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from "class-validator";
-import {
-  DES_INLET_WATER_TEMP,
-  DeviceType,
-  MEASUREMENT_UNITS,
-  Role,
-} from "../constants/enum.constant";
+import { DeviceType, Role } from "../constants/enum.constant";
 import { AUTHENTICATION } from "../constants/response.constant";
 import { PASSWORD_REGEX } from "../services/common.service";
 import { Type } from "class-transformer";
@@ -269,183 +263,4 @@ export class UpdateUserDto {
   @ValidateNested()
   @Type(() => AlertSettings)
   alerts?: AlertSettings;
-}
-
-export class CreateChillerDTO {
-  @ApiProperty({ description: "The ID Of the company" })
-  @IsOptional()
-  @IsString()
-  companyId?: string;
-
-  // @ApiProperty({ description: 'Chiller Type' })
-  // @IsOptional()
-  // @IsString()
-  // type?: string;
-
-  @ApiProperty({ description: "Measurement Unit the chiller is set to use." })
-  @IsNotEmpty()
-  @IsString()
-  @IsIn(Object.keys(MEASUREMENT_UNITS))
-  unit: string;
-
-  @ApiProperty({ description: "Chiller name or number" })
-  @IsNotEmpty()
-  @IsString()
-  name: string;
-
-  @ApiProperty({
-    description: "Number of hours in a week the chiller will be working",
-  })
-  @IsNotEmpty()
-  @IsNumber()
-  weeklyHours: number;
-
-  @ApiProperty({ description: "Number of weeks per year" })
-  @IsNotEmpty()
-  @IsNumber()
-  weeksPerYear: number;
-
-  @ApiProperty({ description: "Average load profile of a chiller" })
-  @IsNotEmpty()
-  @IsNumber()
-  avgLoadProfile: number;
-
-  @ApiProperty({ description: "Design Inlet Water Temperature" })
-  @IsNotEmpty()
-  @IsString()
-  @IsIn(Object.keys(DES_INLET_WATER_TEMP))
-  desInletWaterTemp: string;
-
-  @ApiProperty({ description: "Make of Chiller" })
-  @IsNotEmpty()
-  @IsNumber()
-  make: number;
-
-  @ApiProperty({ description: "Chiller Model" })
-  @IsNotEmpty()
-  @IsString()
-  model: string;
-
-  @ApiProperty({ description: "Chiller Serial Number" })
-  @IsNotEmpty()
-  @IsNumber()
-  serialNumber: number;
-
-  @ApiProperty({ description: "Chiller Manufactured Year" })
-  @IsNotEmpty()
-  @IsNumber()
-  manufacturedYear: number;
-
-  @ApiProperty({ description: "Chiller Refrigerant Type" })
-  @IsNotEmpty()
-  @IsString()
-  refrigType: string;
-
-  @ApiProperty({ description: "Chiller capacity in Tons" })
-  @IsNotEmpty()
-  @IsNumber()
-  tons: number;
-
-  @ApiProperty({ description: "Chiller Efficiency Rating" })
-  @IsNotEmpty()
-  @IsNumber()
-  efficiencyRating: number;
-
-  @ApiProperty({ description: "Chiller Energy Cost" })
-  @IsNotEmpty()
-  @IsNumber()
-  energyCost: number;
-}
-
-export class UpdateChillerDto extends PartialType(CreateChillerDTO) {}
-
-export class CreateChillerWithFacilityDTO {
-  // @ApiProperty({ description: 'The ID Of the company' })
-  @IsOptional()
-  @IsString()
-  companyId?: string;
-
-  // @ApiProperty({ description: 'Chiller Type' })
-  // @IsOptional()
-  // @IsString()
-  // type?: string;
-
-  @ApiProperty({ description: "Measurement Unit the chiller is set to use." })
-  @IsNotEmpty()
-  @IsString()
-  @IsIn(Object.keys(MEASUREMENT_UNITS))
-  unit: string;
-
-  @ApiProperty({ description: "Chiller name or number" })
-  @IsNotEmpty()
-  @IsString()
-  name: string;
-
-  @ApiProperty({
-    description: "Number of hours in a week the chiller will be working",
-  })
-  @IsNotEmpty()
-  @IsNumber()
-  weeklyHours: number;
-
-  @ApiProperty({ description: "Number of weeks per year" })
-  @IsNotEmpty()
-  @IsNumber()
-  weeksPerYear: number;
-
-  @ApiProperty({ description: "Average load profile of a chiller" })
-  @IsNotEmpty()
-  @IsNumber()
-  avgLoadProfile: number;
-
-  // @ApiProperty({ description: "Design Inlet Water Temperature" })
-  // @IsNotEmpty()
-  // @IsString()
-  // @IsIn(Object.keys(DES_INLET_WATER_TEMP))
-  // desInletWaterTemp: string;
-
-  @ApiProperty({ description: "Make of Chiller" })
-  @IsNotEmpty()
-  @IsNumber()
-  make: number;
-
-  @ApiProperty({ description: "Chiller Model" })
-  @IsNotEmpty()
-  @IsString()
-  model: string;
-
-  @ApiProperty({ description: "Chiller Serial Number" })
-  @IsNotEmpty()
-  @IsString()
-  serialNumber: string;
-
-  @ApiProperty({ description: "Chiller Manufactured Year" })
-  @IsNotEmpty()
-  @IsNumber()
-  manufacturedYear: number;
-
-  @ApiProperty({ description: "Chiller Refrigerant Type" })
-  @IsNotEmpty()
-  @IsString()
-  refrigType: string;
-
-  @ApiProperty({ description: "Chiller capacity in Tons" })
-  @IsOptional()
-  @IsNumber()
-  tons: number;
-
-  @ApiProperty({ description: "Chiller capacity in KWR" })
-  @IsOptional()
-  @IsNumber()
-  kwr: number;
-
-  // @ApiProperty({ description: "Chiller Efficiency Rating" })
-  // @IsNotEmpty()
-  // @IsNumber()
-  // efficiencyRating: number;
-
-  @ApiProperty({ description: "Chiller Energy Cost" })
-  @IsNotEmpty()
-  @IsNumber()
-  energyCost: number;
 }

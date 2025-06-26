@@ -12,11 +12,8 @@ import {
 } from "class-validator";
 import { STATES } from "../../../common/constants/enum.constant";
 import { ALTITUDE_UNITS } from "src/common/constants/enum.constant";
-import {
-  // CreateChillerDTO,
-  CreateChillerWithFacilityDTO,
-} from "src/common/dto/common.dto";
 import { Types } from "mongoose";
+import { CreateChillerWithFacilityDTO } from "src/module/chiller/dto/chiller.dto";
 
 export class CreateFacilityWithCompanyDTO {
   @ApiProperty({
