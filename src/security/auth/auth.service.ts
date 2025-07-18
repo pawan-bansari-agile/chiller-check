@@ -248,31 +248,107 @@ export class AuthService {
     return this.jwtService.sign(payload);
   }
 
+  // async createInitialUser(): Promise<void> {
+  //   const user = await this.userModel.findOne({
+  //     email: this.configService.get("database.initialUser.email"),
+  //   });
+
+  //   if (user) {
+  //     this.myLogger.customLog(RESPONSE_SUCCESS.INITIAL_USER_ALREADY_LOADED);
+  //   } else {
+  //     const params: CreateInitialUserInterface = {
+  //       firstName: this.configService.get("database.initialUser.firstName"),
+  //       lastName: this.configService.get("database.initialUser.lastName"),
+  //       email: this.configService.get("database.initialUser.email"),
+  //       role: Role.ADMIN,
+  //       phoneNumber: this.configService.get("database.initialUser.phoneNumber"),
+  //     };
+
+  //     const encryptedPassword = await hash(
+  //       this.configService.get("database.initialUser.password"),
+  //       Number(process.env.PASSWORD_SALT),
+  //     );
+
+  //     params.password = encryptedPassword;
+
+  //     this.userModel.create(params);
+  //     this.myLogger.log(RESPONSE_SUCCESS.INITIAL_USER_LOADED);
+  //   }
+  // }
   async createInitialUser(): Promise<void> {
-    const user = await this.userModel.findOne({
-      email: this.configService.get("database.initialUser.email"),
-    });
-
-    if (user) {
-      this.myLogger.customLog(RESPONSE_SUCCESS.INITIAL_USER_ALREADY_LOADED);
-    } else {
-      const params: CreateInitialUserInterface = {
-        firstName: this.configService.get("database.initialUser.firstName"),
-        lastName: this.configService.get("database.initialUser.lastName"),
-        email: this.configService.get("database.initialUser.email"),
+    const usersToCreate = [
+      {
+        configKey: "database.initialUser",
+        logSuccess: RESPONSE_SUCCESS.INITIAL_USER_LOADED,
+        logExists: RESPONSE_SUCCESS.INITIAL_USER_ALREADY_LOADED,
         role: Role.ADMIN,
-        phoneNumber: this.configService.get("database.initialUser.phoneNumber"),
-      };
+      },
+      {
+        configKey: "database.larry",
+        logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
+        logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
+        role: Role.ADMIN, // change this role accordingly
+      },
+    ];
+    // const user1 = await this.userModel.findOne({
+    //   email: this.configService.get("database.initialUser.email"),
+    // });
 
-      const encryptedPassword = await hash(
-        this.configService.get("database.initialUser.password"),
+    // const user2 = await this.userModel.findOne({
+    //   email: this.configService.get("database.testUser.email"),
+    // });
+
+    // if (user1) {
+    //   this.myLogger.customLog(RESPONSE_SUCCESS.INITIAL_USER_ALREADY_LOADED);
+    // } else {
+    //   const params: CreateInitialUserInterface = {
+    //     firstName: this.configService.get("database.initialUser.firstName"),
+    //     lastName: this.configService.get("database.initialUser.lastName"),
+    //     email: this.configService.get("database.initialUser.email"),
+    //     role: Role.ADMIN,
+    //     phoneNumber: this.configService.get("database.initialUser.phoneNumber"),
+    //   };
+
+    //   const encryptedPassword = await hash(
+    //     this.configService.get("database.initialUser.password"),
+    //     Number(process.env.PASSWORD_SALT),
+    //   );
+
+    //   params.password = encryptedPassword;
+
+    //   this.userModel.create(params);
+    //   this.myLogger.log(RESPONSE_SUCCESS.INITIAL_USER_LOADED);
+    // }
+    for (const userConfig of usersToCreate) {
+      const email = this.configService.get(`${userConfig.configKey}.email`);
+      const existingUser = await this.userModel.findOne({ email });
+
+      if (existingUser) {
+        this.myLogger.customLog(userConfig.logExists);
+        continue;
+      }
+
+      const password = this.configService.get(
+        `${userConfig.configKey}.password`,
+      );
+      const hashedPassword = await hash(
+        password,
         Number(process.env.PASSWORD_SALT),
       );
 
-      params.password = encryptedPassword;
+      const userData: CreateInitialUserInterface = {
+        firstName: this.configService.get(`${userConfig.configKey}.firstName`),
+        lastName: this.configService.get(`${userConfig.configKey}.lastName`),
+        email,
+        phoneNumber: this.configService.get(
+          `${userConfig.configKey}.phoneNumber`,
+        ),
+        role: userConfig.role,
+        password: hashedPassword,
+      };
 
-      this.userModel.create(params);
-      this.myLogger.log(RESPONSE_SUCCESS.INITIAL_USER_LOADED);
+      await this.userModel.create(userData);
+      this.myLogger.log(userConfig.logSuccess);
     }
   }
 

@@ -41,6 +41,8 @@ export const RESPONSE_SUCCESS = {
   COMPANY_DEACTIVATED: "Company inactivated successfully.",
   COMPANY_IN_DEMO: "Company Marked as Demo",
   COMPANY_PROSPECTED: "Company Marked as Prospect",
+  TEST_USER_LOADED: "Test User Loaded successfully",
+  TEST_USER_ALREADY_LOADED: "Test User already loaded!",
 };
 
 export const RESPONSE_ERROR = {

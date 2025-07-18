@@ -13,6 +13,13 @@ export default registerAs("database", () => ({
     password: "Admin@123",
     phoneNumber: "+917798813105",
   },
+  larry: {
+    firstName: "Larry",
+    lastName: "Seigel",
+    email: "lseigel123@gmail.com",
+    password: "Admin@123",
+    phoneNumber: "+14043079455",
+  },
   mongo: {
     connectionString: process.env.DATABASE_CONNECTION,
   },
