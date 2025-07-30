@@ -264,3 +264,9 @@ export class UpdateFacilityStatusDto {
   @IsBoolean()
   isActive: boolean;
 }
+
+export class ActiveFacilities {
+  @ApiProperty({ type: String, description: "Array of Company IDs" })
+  // @IsMongoId({ each: true })
+  companyId: string;
+}

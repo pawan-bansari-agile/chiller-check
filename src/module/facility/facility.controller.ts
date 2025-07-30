@@ -28,13 +28,14 @@ import {
 } from "src/common/constants/response.constant";
 // import { Public } from 'src/security/auth/auth.decorator';
 import {
+  ActiveFacilities,
   CreateFacilityDTO,
   FacilityListDto,
   UpdateFacilityDto,
   UpdateFacilityStatusDto,
 } from "./dto/facility.dto";
 import { ResponseMessage } from "src/common/decorators/response.decorator";
-import { Public } from "src/security/auth/auth.decorator";
+// import { Public } from "src/security/auth/auth.decorator";
 
 @ApiTags("Facility")
 @Controller("facility")
@@ -68,7 +69,7 @@ export class FacilityController {
   }
 
   @Post("list")
-  @Public()
+  // @Public()
   @ApiBearerAuth()
   @ApiOkResponse({
     schema: {
@@ -82,12 +83,6 @@ export class FacilityController {
   @ApiResponse({
     status: 403,
     description: "Forbidden: Only an Admin can create Company!",
-  })
-  @ApiQuery({
-    name: "companyId",
-    required: false, // Marking companyId as optional in Swagger UI
-    type: String,
-    description: "The Company ID to filter facilities (optional)",
   })
   @ResponseMessage(FACILITY.FACILITY_LIST)
   findAll(@Request() req: Request, @Body() body: FacilityListDto) {
@@ -117,8 +112,11 @@ export class FacilityController {
     description: "The Company ID to filter facilities (optional)",
   })
   @ResponseMessage(FACILITY.FACILITY_LIST)
-  findAllFacilities(@Query("companyId") companyId?: string) {
-    return this.facilityService.findAllFacilities(companyId);
+  findAllFacilities(
+    @Request() req: Request,
+    @Query("companyId") companyId?: string,
+  ) {
+    return this.facilityService.findAllFacilities(req, companyId);
   }
 
   @ApiOkResponse({
@@ -186,7 +184,7 @@ export class FacilityController {
     status: 200,
     description: "Facility status updated successfully.",
   })
-  @ResponseMessage(FACILITY.FACILITY_STATUS_UPDATED)
+  // @ResponseMessage(FACILITY.FACILITY_STATUS_UPDATED)
   // @Public()
   @ApiBearerAuth()
   async updateFacilityStatus(
@@ -194,6 +192,27 @@ export class FacilityController {
     @Body() body: UpdateFacilityStatusDto, // Request body with new isActive value
   ) {
     return this.facilityService.updateStatus(facilityId, body);
+  }
+
+  @Post("findAll/activeFacilities")
+  // @Public()
+  @ApiBearerAuth()
+  @ApiOkResponse({
+    schema: {
+      example: {
+        status: 200,
+        description: "All Active Chillers listed",
+        message: FACILITY.ACTIVE_FACILITY_LISTED,
+      },
+    },
+  })
+  @ApiResponse({
+    status: 403,
+    description: "Forbidden: Only an Admin can list chillers!",
+  })
+  @ResponseMessage(FACILITY.ACTIVE_FACILITY_LISTED)
+  findAllActiveChillers(@Body() dto?: ActiveFacilities) {
+    return this.facilityService.findAllActiveChillers(dto);
   }
 
   @Delete(":id")

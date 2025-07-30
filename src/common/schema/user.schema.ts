@@ -1,14 +1,18 @@
-import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
+import { Prop, raw, Schema, SchemaFactory } from "@nestjs/mongoose";
 import mongoose, { Document } from "mongoose";
-import { Schema as MongooseSchema } from "mongoose";
 
 import { TABLE_NAMES } from "../constants/table-name.constant";
 import { Role } from "../constants/enum.constant";
 import {
-  AlertCondition,
-  LogEntryAlert,
+  // AlertCondition,
+
   ModulePermission,
 } from "src/module/user/types/user.types";
+import {
+  AlertCondition,
+  LogEntryAlert,
+  NotificationType,
+} from "src/module/user/dto/user.dto";
 
 export type UserDocument = User &
   Document & { createdAt: Date; updatedAt: Date };
@@ -36,11 +40,14 @@ export class User {
   @Prop({})
   profileImage: string;
 
-  @Prop({ default: true })
+  @Prop({ default: false })
   isActive: boolean;
 
   @Prop({ default: false })
   isDeleted: boolean;
+
+  @Prop({ default: false })
+  isProfileUpdated: boolean;
 
   @Prop()
   resetPasswordToken: string;
@@ -53,10 +60,17 @@ export class User {
 
   @Prop({
     required: false,
-    type: [MongooseSchema.Types.ObjectId],
+    type: [mongoose.Types.ObjectId],
     // ref: Departments.name,
   })
-  facilityIds: MongooseSchema.Types.ObjectId[];
+  facilityIds: mongoose.Types.ObjectId[];
+
+  @Prop({
+    required: false,
+    type: [mongoose.Types.ObjectId],
+    // ref: Departments.name,
+  })
+  chillerIds: mongoose.Types.ObjectId[];
 
   @Prop({ default: 0 })
   failedLoginAttempts: number;
@@ -73,9 +87,82 @@ export class User {
   // @Prop({ type: [Object] })
   // responsibilities?: Responsibility[];
 
-  @Prop({ type: [Object] })
+  // @Prop({ type: [Object] })
+  // alerts?: {
+  //   general?: AlertGroup;
+  //   logs?: LogEntryAlert[];
+  // };
+  // @Prop({
+  //   type: {
+  //     general: {
+  //       conditions: [{ type: Object }],
+  //       notifyBy: {
+  //         type: String,
+  //         enum: Object.values(NotificationType),
+  //         required: false,
+  //       },
+  //     },
+  //     logs: [{ type: Object }],
+  //   },
+  //   default: undefined,
+  // })
+  // alerts?: {
+  //   general?: {
+  //     conditions: AlertCondition[];
+  //     notifyBy?: NotificationType;
+  //   };
+  //   logs?: LogEntryAlert[];
+  // };
+  @Prop(
+    raw({
+      general: {
+        conditions: [
+          {
+            _id: false,
+            metric: String,
+            warning: { operator: String, threshold: Number },
+            alert: { operator: String, threshold: Number },
+          },
+        ],
+        notifyBy: {
+          type: String,
+          enum: Object.values(NotificationType),
+          required: false,
+        },
+      },
+      logs: [
+        {
+          _id: false,
+          type: {
+            type: String,
+            enum: ["manual", "maintenance", "csv", "program"],
+            required: true,
+          },
+          daysSince: { type: Number, required: true },
+          notifyBy: {
+            type: String,
+            enum: Object.values(NotificationType),
+            required: false,
+          },
+          facilityIds: {
+            type: [mongoose.Schema.Types.ObjectId],
+            ref: "Facility",
+            default: undefined,
+          },
+          operatorIds: {
+            type: [mongoose.Schema.Types.ObjectId],
+            ref: "User",
+            default: undefined,
+          },
+        },
+      ],
+    }),
+  )
   alerts?: {
-    general?: AlertCondition[];
+    general?: {
+      conditions: AlertCondition[];
+      notifyBy?: NotificationType;
+    };
     logs?: LogEntryAlert[];
   };
 }

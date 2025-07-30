@@ -1,6 +1,7 @@
 export enum AppEnvironment {
   DEVELOPMENT = "development",
   PRODUCTION = "production",
+  LOCAL = "local",
 }
 
 export enum Role {
@@ -19,9 +20,12 @@ export enum CompanyStatus {
 }
 
 export enum ChillerStatus {
-  PENDING = "pending",
-  ACTIVE = "active",
-  IN_ACTIVE = "inactive",
+  // PENDING = "pending",
+  // ACTIVE = "active",
+  // IN_ACTIVE = "inactive",
+  Pending = "Pending",
+  Active = "Active",
+  InActive = "Inactive",
 }
 
 export enum DeviceType {
@@ -58,13 +62,125 @@ export const ALTITUDE_UNITS = {
 };
 
 export const MEASUREMENT_UNITS = {
-  english: "English",
-  siMetric: "SI Metrics",
+  English: "English",
+  SIMetric: "SI Metric",
+};
+
+export const UNIT_DEPENDENT_OPTIONS = {
+  [MEASUREMENT_UNITS.English]: {
+    commonPressureUnits: ["PSIG", "Feet"],
+    condPressureUnits: ["PSIG", "PSIA", "InHg"],
+  },
+  [MEASUREMENT_UNITS.SIMetric]: {
+    commonPressureUnits: ["KPA", "Bar"],
+    condPressureUnits: ["KPA", "Bar"],
+  },
+};
+
+export const BEARING_TEMP = {
+  Yes: "Yes",
+  No: "No",
 };
 
 export const DES_INLET_WATER_TEMP = {
   "85°F / 29.44°C": "85°F / 29.44°C",
   "86°F / 30°C": "85°F / 29.44°C",
+};
+
+export const Make = {
+  Trane: "Trane",
+  Carrier: "Carrier",
+  York: "York",
+  McQuay: "McQuay",
+  Westinghouse: "Westinghouse",
+  "Dunham-Bush": "Dunham-Bush",
+  FES: "FES",
+  Sullair: "Sullair",
+  "Arctic Cool": "Arctic Cool",
+  Multistack: "Multistack",
+  Daikin: "Daikin",
+};
+
+export const CHILLER_STATUS = {
+  Pending: "Pending",
+  Active: "Active",
+  InActive: "Inactive",
+};
+
+export const REFRIGERANT_TYPE = {
+  "R-11": { label: "R-11", isHighPressure: false },
+  "R-113": { label: "R-113", isHighPressure: false },
+  "R-12": { label: "R-12", isHighPressure: true },
+  "R-123": { label: "R-123", isHighPressure: false },
+  "R-134a": { label: "R-134a", isHighPressure: true },
+  "R-22": { label: "R-22", isHighPressure: true },
+  "R-500": { label: "R-500", isHighPressure: true },
+  "R-114": { label: "R-114", isHighPressure: false },
+  "R-514A": { label: "R-514A", isHighPressure: false },
+};
+
+export const VOLTAGE_CHOICE = {
+  "3-Phase": "3-Phase",
+  "1-Phase": "1-Phase",
+  "Do Not Log Voltage": "Do Not Log Voltage",
+};
+
+export const AMPERAGE_CHOICE = {
+  "3-Phase": "3-Phase",
+  "1-Phase": "1-Phase",
+  "Enter % Load": "Enter % Load",
+};
+
+export const MAINTENANCE_TYPES = {
+  AnnualMaintenanceDate: "Annual Maintenance Date",
+  OilChangeDate: "Oil Change Date",
+  DateOilAdded: "Date Oil Added",
+  OilFilterChangeDate: "Oil Filter Change Date",
+  OilAnalysisDate: "Oil Analysis Date",
+  EddyCurrentTestDateCondenser: "Eddy Current Test Date (Condenser)",
+  EddyCurrentTestDateEvaporator: "Eddy Current Test Date (Evaporator)",
+  MajorStopInspection: "Major Stop Inspection",
+  RefrigerantAnalysisDate: "Refrigerant Analysis Date",
+  DateRefrigerantAdded: "Date Refrigerant Added",
+  CondenserTubeCleaningDate: "Condenser Tube Cleaning Date",
+  EvaporatorTubeCleaningDate: "Evaporator Tube Cleaning Date",
+  PurgeTankReclaimDate: "Purge Tank Reclaim Date",
+  PurgeFilterDryerChangeDate: "Purge Filter Dryer Change Date",
+  MajorRepair: "Major Repair",
+  RunningInspection: "Running Inspection",
+  VibrationAnalysis: "Vibration Analysis",
+};
+
+export const MAINTENANCE_CATEGORIES = {
+  AnnualMaintenance: "Annual Maintenance",
+  OilMaintenance: "Oil Maintenance",
+  EddyCurrentTests: "Eddy Current Tests",
+  MajorStopInspectionCompressorTeardown:
+    "Major Stop Inspection (compressor teardown)",
+  RefrigerantMaintenance: "Refrigerant Maintenance",
+  TubeCleaning: "Tube Cleaning",
+  PurgeMaintenance: "Purge Maintenance",
+  MajorRepairs: "Major Repairs",
+  RunningInspection: "Running Inspection",
+  VibrationAnalysis: "Vibration Analysis",
+};
+
+export const OIL_PRESSURE_DIFF = {
+  "Enter High and Low Pressures": "Enter High and Low Pressures",
+  "Enter High Pressure Only": "Enter High Pressure Only",
+  "Enter Differential Directly": "Enter Differential Directly",
+  "Do Not Log Lube System": "Do Not Log Lube System",
+};
+
+export const AVERAGE_EFFICIENCY_LOSS = {
+  "Run Hours (Log reading must include Run Hours)":
+    "Run Hours (Log reading must include Run Hours)",
+  Days: "Days",
+};
+
+export const PURGE_READING_UNIT = {
+  "Mins. Only": "Mins. Only",
+  "Hrs. & Min.": "Hrs. & Min.",
 };
 
 export const STATES = {

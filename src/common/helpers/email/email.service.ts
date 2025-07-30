@@ -35,10 +35,18 @@ export class EmailService {
     options: EmailOptions,
   ): Promise<nodemailer.SentMessageInfo> {
     try {
-      if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
-        return await this.smtpMail(options);
-      } else {
+      // if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
+      //   return await this.smtpMail(options);
+      // } else
+      if (
+        process.env.APP_ENV === AppEnvironment.PRODUCTION ||
+        process.env.APP_ENV === AppEnvironment.DEVELOPMENT
+      ) {
         return await this.sesMail(options);
+      } else {
+        return {
+          html: options?.html,
+        };
       }
     } catch (e) {
       console.log("email sender func error:::::", e);

@@ -1,3 +1,5 @@
+import { ComparisonOperator } from "../dto/user.dto";
+
 export enum ModuleName {
   COMPANY = "company",
   FACILITY = "facility",
@@ -7,6 +9,7 @@ export enum ModuleName {
   MAINTENANCE = "maintenance",
   REPORT = "report",
   SETTING = "setting",
+  CHILLER_BULK_COST_UPDATE = "chillerBulkCost",
 }
 
 export interface ModulePermission {
@@ -22,7 +25,7 @@ export interface Responsibility {
 }
 
 export type NotificationType = "web" | "email" | "both";
-export type ComparisonOperator = "<=" | "=" | ">=";
+// export type ComparisonOperator = "<=" | "=" | ">=";
 
 export interface AlertCondition {
   metric: string;
@@ -38,7 +41,7 @@ export interface AlertCondition {
 }
 
 export interface LogEntryAlert {
-  type: "manual" | "maintenance" | "csv" | "programAccess";
+  type: "manual" | "maintenance" | "csv" | "program";
   daysSince: number;
   notifyBy: NotificationType;
   facilityIds?: string[];

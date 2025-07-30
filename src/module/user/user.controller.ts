@@ -10,7 +10,7 @@ import {
   Req,
 } from "@nestjs/common";
 import { UserService } from "./user.service";
-import { Role } from "src/common/constants/enum.constant";
+// import { Role } from 'src/common/constants/enum.constant';
 import { UpdateUserDto } from "src/common/dto/common.dto";
 import {
   ApiBearerAuth,
@@ -21,7 +21,7 @@ import {
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
-import { AuthExceptions } from "src/common/helpers/exceptions";
+// import { AuthExceptions } from 'src/common/helpers/exceptions';
 import {
   RESPONSE_ERROR,
   RESPONSE_SUCCESS,
@@ -31,9 +31,11 @@ import { ResponseMessage } from "src/common/decorators/response.decorator";
 // import { Public } from 'src/security/auth/auth.decorator';
 import {
   CreateUserDto,
+  OperatorByFacilitiesDto,
   UpdateUserStatusDto,
   UserListDto,
 } from "./dto/user.dto";
+// import mongoose from 'mongoose';
 @Controller("users")
 @ApiTags("Users")
 export class UserController {
@@ -65,7 +67,7 @@ export class UserController {
   @Put(":id")
   @ApiOperation({ summary: "Update user details" })
   //   @Public()
-  @ResponseMessage(USER.USER_UPDATE)
+  // @ResponseMessage(USER.USER_UPDATE)
   @ApiParam({
     name: "id",
     description: "ID of the user to be updated",
@@ -101,30 +103,14 @@ export class UserController {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     @Request() req,
   ) {
-    // console.log('✌️req --->', req.user);
-
-    // uncomment this line when changing this api to protected
-    const currentUserId = req.user._id;
-    // const currentUserId = id;
-
-    // uncomment this line when changing this api to protected
-    const currentUserRole = req.user.role;
-    // const currentUserRole = 'admin';
-
-    // If the user is a super admin, they can edit any user
-    if (currentUserRole === Role.ADMIN) {
-      return this.userService.updateProfile(id, updateUserDto, currentUserRole);
-    }
-
-    // Regular user can only update their own profile
-    if (currentUserId !== id) {
-      throw AuthExceptions.ForbiddenException();
-    }
+    const loggedInUserId = req["user"]["_id"];
+    console.log("✌️loggedInUserId --->", loggedInUserId);
 
     return await this.userService.updateProfile(
       id,
       updateUserDto,
-      currentUserRole,
+      loggedInUserId,
+      // currentUserRole,
     );
   }
 
@@ -163,25 +149,9 @@ export class UserController {
   })
   async getUserById(@Param("id") id: string, @Request() req) {
     console.log("✌️req --->", req.user);
-    // uncomment the below line when changing this api to protected
-    const currentUserId = req.user._id;
-    // const currentUserId = id;
+    const loggedInUserId = req["user"]["_id"];
 
-    // uncomment the below line when changing this api to protected
-    const currentUserRole = req.user.role;
-    // const currentUserRole = "admin";
-
-    // If the user is a super admin, they can view any user's details
-    if (currentUserRole === Role.ADMIN) {
-      return this.userService.getUserById(id);
-    }
-
-    // Regular user can only view their own profile
-    if (currentUserId !== id) {
-      throw AuthExceptions.ForbiddenException();
-    }
-
-    return this.userService.getUserById(id);
+    return this.userService.getUserById(id, loggedInUserId);
   }
 
   @Post("list")
@@ -202,8 +172,8 @@ export class UserController {
   })
   @ApiBearerAuth()
   @ResponseMessage(RESPONSE_SUCCESS.USER_LISTED)
-  findAll(@Body() body: UserListDto) {
-    return this.userService.findAll(body);
+  findAll(@Request() req: Request, @Body() body: UserListDto) {
+    return this.userService.findAll(req, body);
   }
 
   @Patch("status")
@@ -222,9 +192,37 @@ export class UserController {
     description: "Forbidden: Only Admins allowed",
   })
   @ApiBearerAuth()
-  @ResponseMessage(USER.USER_STATUS_UPDATED)
+  // @ResponseMessage(USER.USER_STATUS_UPDATED)
   @ApiOperation({ summary: "Update user status (activate/deactivate)" })
   async updateUserStatus(@Body() dto: UpdateUserStatusDto) {
     return this.userService.updateUserStatus(dto);
+  }
+
+  @Post("assigned-to-chillers")
+  @ApiOkResponse({
+    schema: {
+      example: {
+        status: 200,
+        description: "User List fetched successfully",
+        message: "User listing success",
+      },
+    },
+  })
+  @ApiOperation({ summary: "List Users!" })
+  @ApiResponse({
+    status: 403,
+    description: "Forbidden: Only Admins allowed",
+  })
+  @ApiBearerAuth()
+  @ResponseMessage(RESPONSE_SUCCESS.OPERATORS_LISTED)
+  async getUsersAssignedToChillers(@Body() body: OperatorByFacilitiesDto) {
+    // if (!body.facilityIds || body.facilityIds.length === 0) {
+    //   return { message: 'No facilityIds provided', data: [] };
+    // }
+
+    // const objectIds = body.facilityIds.map(
+    //   (id) => new mongoose.Types.ObjectId(id),
+    // );
+    return await this.userService.getUsersAssignedToChillers(body);
   }
 }

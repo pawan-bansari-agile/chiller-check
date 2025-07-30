@@ -91,16 +91,24 @@ export const congratulationTemplate = (
                 <td style="padding-bottom: 20px;">We are very excited to have you onboard.</td>
               </tr>
               <tr>
-                <td style="padding-bottom: 20px;">You have been invited to this system as a ${role}.</td>
+                <td style="padding-bottom: 20px;">Your account has been successfully created.</td>
               </tr>
               <tr>
-                <td style="padding-bottom: 20px;">Setup Your Password by clicking on the below button.</td>
+                <td style="padding-bottom: 20px;">You can access the system by your registered email: ${email}</td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">Platform Link: <a href="${redirect_url}" style="color: #000abc;">${redirect_url}.</td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">Role: ${role}.</td>
               </tr>
               <tr>
                 <td style="padding-bottom: 30px;">
-                  Once your password is setup you can login into the system
-                  using your registered email <b>${email}.</b>
+                    Email: <b>${email}.</b>
                 </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">You can now set your password by clicking the button below.</td>
               </tr>
               <tr>
                 <td style="text-align: center;padding-bottom: 35px;">
@@ -125,17 +133,21 @@ export const congratulationTemplate = (
               <tr>
                 <td style="padding-bottom: 20px;">
                   <span
-                    >Please note that the option to set your password will
-                    expire within 24 hours.</span
+                    >After you have set your password, you would be able to login & use the system by setting up facilities & chillers. Also manage facility managers and operators assign them chillers to start logging in the chiller readings.</span
                   >
                 </td>
               </tr>
               <tr>
                 <td style="padding-bottom: 20px;">
                   <span
-                    >If the password link has expired, you can reach out to your
-                    superior to generate a new password link & share it. Else
-                    email to us at support@chillercheck.com</span
+                    >Please note that the option to set your password will expire within 24 hours.</span
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px;">
+                  <span
+                    >If the password link has expired, you can reach out to your superior to generate a new password link & share it. Else email to us at support@chillercheck.com</span
                   >
                 </td>
               </tr>
@@ -201,4 +213,5 @@ export const congratulationTemplate = (
     </table>
   </body>
 </html>
+
   `;

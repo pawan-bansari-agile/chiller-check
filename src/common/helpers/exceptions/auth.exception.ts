@@ -81,6 +81,17 @@ export const AuthExceptions = {
     );
   },
 
+  PendingResetPassword(): HttpException {
+    return new HttpException(
+      {
+        message: "Password reset required. Check your email for the link.",
+        error: "PasswordResetPending",
+        statusCode: HttpStatus.BAD_REQUEST,
+      },
+      HttpStatus.BAD_REQUEST,
+    );
+  },
+
   AccountNotExist(): HttpException {
     return new HttpException(
       {
@@ -95,7 +106,7 @@ export const AuthExceptions = {
   AccountNotActive(): HttpException {
     return new HttpException(
       {
-        message: "Account not active!",
+        message: "Your account has been inactivated. Please contact admin.",
         error: "AccountNotActive",
         statusCode: HttpStatus.BAD_REQUEST,
       },

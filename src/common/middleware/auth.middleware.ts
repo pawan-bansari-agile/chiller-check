@@ -65,6 +65,13 @@ export class AuthMiddleware implements NestMiddleware {
               data: {},
             });
           }
+          if (user && user.isProfileUpdated == true) {
+            return res.status(HttpStatus.FORBIDDEN).json({
+              statusCode: HttpStatus.FORBIDDEN,
+              message: RESPONSE_ERROR.PROFILE_UPDATE,
+              data: {},
+            });
+          }
           req["user"] = letData;
           next();
         } else {

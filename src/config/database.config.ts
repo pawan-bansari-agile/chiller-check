@@ -11,7 +11,8 @@ export default registerAs("database", () => ({
     lastName: "Check",
     email: "chiller.check@yopmail.com",
     password: "Admin@123",
-    phoneNumber: "+917798813105",
+    phoneNumber: "+17577050564",
+    isActive: true,
   },
   larry: {
     firstName: "Larry",

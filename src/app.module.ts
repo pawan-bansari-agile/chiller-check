@@ -22,13 +22,21 @@ import { ImageUploadModule } from "./module/image-upload/image-upload.module";
 import { CompanyModule } from "./module/company/company.module";
 import { FacilityModule } from "./module/facility/facility.module";
 import { CmsModule } from "./module/cms/cms.module";
-import { UserAccessGuard } from "./security/auth/guards/user-module.guard";
+// import { UserAccessGuard } from './security/auth/guards/user-module.guard';
+import { ChillerModule } from "./module/chiller/chiller.module";
+import { ProblemSolutionModule } from "./module/problem-solution/problem-solution.module";
+import { TimelineModule } from "./module/timeline/timeline.module";
+import { LogModule } from "./module/log/log.module";
+import { ScheduleModule } from "@nestjs/schedule";
+import { Company, CompanySchema } from "./common/schema/company.schema";
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
       { name: Device.name, schema: DeviceSchema },
+      { name: Company.name, schema: CompanySchema },
     ]),
     ConfigModule.forRoot({
       load: [AppConfiguration, DatabaseConfiguration, AuthConfiguration],
@@ -44,6 +52,10 @@ import { UserAccessGuard } from "./security/auth/guards/user-module.guard";
     CompanyModule,
     FacilityModule,
     CmsModule,
+    ChillerModule,
+    ProblemSolutionModule,
+    TimelineModule,
+    LogModule,
   ],
   providers: [
     {
@@ -62,10 +74,10 @@ import { UserAccessGuard } from "./security/auth/guards/user-module.guard";
       provide: APP_INTERCEPTOR,
       useClass: TransformInterceptor,
     },
-    {
-      provide: APP_GUARD,
-      useClass: UserAccessGuard,
-    },
+    // {
+    //   provide: APP_GUARD,
+    //   useClass: UserAccessGuard,
+    // },
     CryptoService,
   ],
 })

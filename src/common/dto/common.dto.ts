@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
+  IsArray,
   // IsArray,
   IsDateString,
   IsEmail,
@@ -8,7 +9,7 @@ import {
   IsNumber,
   IsObject,
   IsOptional,
-  IsPhoneNumber,
+  // IsPhoneNumber,
   IsString,
   Matches,
   ValidateIf,
@@ -185,14 +186,23 @@ export class UpdateUserDto {
   @IsOptional()
   readonly lastName?: string;
 
+  // @ApiProperty({
+  //   description: "User phone number",
+  //   example: "+911234567890",
+  //   required: false,
+  // })
+  // @IsOptional()
+  // @IsPhoneNumber()
+  // readonly phoneNumber?: string;
   @ApiProperty({
-    description: "User phone number",
-    example: "+911234567890",
-    required: false,
+    description: "Phone number (US only)",
+    example: "+12025550123",
   })
-  @IsOptional()
-  @IsPhoneNumber()
-  readonly phoneNumber?: string;
+  @Matches(/^\+1\d{10}$/, {
+    message:
+      "Phone number must be a valid US number in the format +1XXXXXXXXXX",
+  })
+  phoneNumber: string;
 
   @ApiProperty({
     description:
@@ -213,6 +223,35 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   profileImage?: string;
+
+  @ApiProperty({
+    description: "Company Id of the assigned company",
+    example: "123asd123asd123asd123asd",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
+
+  @ApiProperty({
+    description: "Facility Ids of the assigned facility",
+    example: "[123asd123asd123asd123asd,456qwe456qwe456qwe456qwe]",
+    required: false,
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  facilityIds?: string[];
+
+  @ApiProperty({
+    description: "Chiller Ids of the assigned chillers.",
+    example: "[123asd123asd123asd123asd,456qwe456qwe456qwe456qwe]",
+    required: false,
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  chillerIds?: string[];
 
   @ApiPropertyOptional({
     type: Object,
@@ -242,14 +281,16 @@ export class UpdateUserDto {
   @ApiPropertyOptional({
     description: "Alert configuration",
     example: {
-      general: [
-        {
-          metric: "Outside Air Temp",
-          warning: { operator: ">=", threshold: 30 },
-          alert: { operator: ">=", threshold: 40 },
-          notifyBy: "email",
-        },
-      ],
+      general: {
+        notifyBy: "email",
+        conditions: [
+          {
+            metric: "Outside Air Temp",
+            warning: { operator: ">=", threshold: 30 },
+            alert: { operator: ">=", threshold: 40 },
+          },
+        ],
+      },
       logs: [
         {
           type: "manual",

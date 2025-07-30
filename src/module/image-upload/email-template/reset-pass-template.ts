@@ -46,23 +46,24 @@ export const resetPasswordTemplate = (
                                         </h1>
                                     <p
                                         style="font-size: 16px;line-height: 24px;font-weight: 500;color: rgba(0, 0, 0,0.7);">
-                                        We are sending this email because you requested a password reset. Click on Set
-                                        New Password button below to create a new password.</p>
-                                    <p
-                                        style="font-size: 16px;line-height: 24px;font-weight: 500;color: rgba(0, 0, 0,0.7);">
-                                        If you didn’t request a password reset, please ignore this email.</p>
-                                    <a href="${redirect_url}">
+                                        You can now set your password by clicking the button below.</p>
+                                        <a href="${redirect_url}">
                                         <button
-                                            style="margin: 10px 0 30px;background: #1B686A;box-shadow: none;border: none;color: #fff;font-size: 16px;line-height: 24px;font-weight: 400;border-radius: 10px;padding: 13px 30px;cursor: pointer;">Set
-                                            New Password</button></a>
+                                        style="margin: 10px 0 30px;background: #1B686A;box-shadow: none;border: none;color: #fff;font-size: 16px;line-height: 24px;font-weight: 400;border-radius: 10px;padding: 13px 30px;cursor: pointer;">Set
+                                        New Password</button></a>
+                                        <p
+                                            style="font-size: 16px;line-height: 24px;font-weight: 500;color: rgba(0, 0, 0,0.7);">
+                                            After you have set your password, you would be able to login & use the system.</p>
+                                        <p
+                                            style="font-size: 16px;line-height: 24px;font-weight: 500;color: rgba(0, 0, 0,0.7);">
+                                            Please note that the option to set your password will expire within 24 hours.</p>
                                     <div style="width: 500px;margin: 0 auto;border-bottom: 1px solid #E4E9F8;"></div>
                                 </li>
                                 <li style="width: 515px;margin: 0 auto;">
                                     <h2
                                         style="list-style: none;margin-bottom: 5px; padding-bottom: 30px; font-size: 16px;font-weight: 500;line-height: 26px;color: rgba(0, 0, 0,0.7);">
-                                        Please feel free to contact us on
-                                        <a style="color: #1C7678;text-decoration: none;"
-                                            href="">support@instaclaus.com</a>
+                                        If the password link has expired, you can reach out to your superior to generate a new password link & share it. Else email to us at <a style="color: #1C7678;text-decoration: none;"
+                                            href="">support@chillercheck.com</a>
                                     </h2>
                                 </li>
                             </ul>
@@ -72,9 +73,6 @@ export const resetPasswordTemplate = (
                         <td>
                             <h4 style="font-size: 16px;font-weight: 500;line-height: 26px;color: #475467;margin: 0;">
                                 Thanks,</h4>
-                            <p
-                                style="font-size: 20px;font-weight: 700;line-height: 26px;color: #1D2939;margin: 0 0 30px;">
-                                Team Instaclaus</p>
                         </td>
                     </tr>
                 </table>

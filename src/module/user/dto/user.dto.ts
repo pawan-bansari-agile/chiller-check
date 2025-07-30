@@ -3,7 +3,7 @@ import {
   IsEnum,
   IsNotEmpty,
   IsOptional,
-  IsPhoneNumber,
+  // IsPhoneNumber,
   IsString,
   IsBoolean,
   IsObject,
@@ -13,9 +13,10 @@ import {
   registerDecorator,
   ValidationArguments,
   ValidationOptions,
-  IsIn,
+  // IsIn,
   IsMongoId,
   ValidateIf,
+  Matches,
 } from "class-validator";
 import { Type } from "class-transformer";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
@@ -32,6 +33,8 @@ export enum ComparisonOperator {
   LTE = "<=",
   EQ = "=",
   GTE = ">=",
+  LT = "<",
+  GT = ">",
 }
 
 const validModuleKeys = Object.values(ModuleName);
@@ -100,6 +103,19 @@ export class AlertCondition {
   @Type(() => Threshold)
   alert: Threshold;
 
+  // @IsEnum(NotificationType, {
+  //   message: `notifyBy must be one of: ${Object.values(NotificationType).join(', ')}`,
+  // })
+  // notifyBy: NotificationType;
+}
+
+export class AlertGroup {
+  // @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AlertCondition)
+  conditions: AlertCondition[];
+
+  @IsOptional()
   @IsEnum(NotificationType, {
     message: `notifyBy must be one of: ${Object.values(NotificationType).join(", ")}`,
   })
@@ -108,14 +124,15 @@ export class AlertCondition {
 
 // --- LogEntryAlert DTO ---
 export class LogEntryAlert {
-  @IsEnum(["manual", "maintenance", "csv", "programAccess"], {
-    message: `type must be one of: manual, maintenance, csv, programAccess`,
+  @IsEnum(["manual", "maintenance", "csv", "program"], {
+    message: `type must be one of: manual, maintenance, csv, program`,
   })
-  type: "manual" | "maintenance" | "csv" | "programAccess";
+  type: "manual" | "maintenance" | "csv" | "program";
 
   @IsNumber()
   daysSince: number;
 
+  @IsOptional()
   @IsEnum(NotificationType)
   notifyBy: NotificationType;
 
@@ -142,10 +159,10 @@ export class Responsibility {
 // --- AlertSettings wrapper ---
 export class AlertSettings {
   @IsOptional()
-  @IsArray()
+  // @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => AlertCondition)
-  general?: AlertCondition[];
+  @Type(() => AlertGroup)
+  general?: AlertGroup;
 
   @IsOptional()
   @IsArray()
@@ -171,8 +188,17 @@ export class CreateUserDto {
   @IsNotEmpty()
   email: string;
 
-  @ApiProperty({ description: "Phone number", example: "+911234567890" })
-  @IsPhoneNumber(null)
+  // @ApiProperty({ description: 'Phone number', example: '+911234567890' })
+  // @IsPhoneNumber(null)
+  // phoneNumber: string;
+  @ApiProperty({
+    description: "Phone number (US only)",
+    example: "+12025550123",
+  })
+  @Matches(/^\+1\d{10}$/, {
+    message:
+      "Phone number must be a valid US number in the format +1XXXXXXXXXX",
+  })
   phoneNumber: string;
 
   @ApiProperty({ enum: Role })
@@ -188,7 +214,7 @@ export class CreateUserDto {
     type: Object,
     example: {
       facility: { view: true, add: true, edit: true, toggleStatus: true },
-      user: { view: true, add: true, edit: true, toggleStatus: true },
+      users: { view: true, add: true, edit: true, toggleStatus: true },
     },
   })
   @IsOptional()
@@ -211,17 +237,24 @@ export class CreateUserDto {
   // @IsNotEmpty()
   facilityIds: string[];
 
+  @ApiProperty({ description: "chiller ids" })
+  @ValidateIf((r) => r.role == Role.OPERATOR)
+  // @IsNotEmpty()
+  chillerIds: string[];
+
   @ApiPropertyOptional({
     description: "Alert configuration",
     example: {
-      general: [
-        {
-          metric: "Outside Air Temp",
-          warning: { operator: ">=", threshold: 30 },
-          alert: { operator: ">=", threshold: 40 },
-          notifyBy: "email",
-        },
-      ],
+      general: {
+        notifyBy: "email",
+        conditions: [
+          {
+            metric: "Outside Air Temp",
+            warning: { operator: ">=", threshold: 30 },
+            alert: { operator: ">=", threshold: 40 },
+          },
+        ],
+      },
       logs: [
         {
           type: "manual",
@@ -255,7 +288,8 @@ export class UserListDto {
 
   @ApiProperty({ required: false, enum: ["ASC", "DESC"] })
   @IsOptional()
-  @IsIn(["ASC", "DESC"])
+  // @IsIn(['ASC', 'DESC'])
+  // @Transform(({ value }) => value?.toUpperCase())
   sort_order?: "ASC" | "DESC";
 
   @ApiProperty()
@@ -265,17 +299,17 @@ export class UserListDto {
 
   @ApiProperty()
   @IsOptional()
-  @IsMongoId()
+  // @IsMongoId()
   companyId?: string;
 
   @ApiProperty()
   @IsOptional()
-  @IsMongoId()
+  // @IsMongoId()
   facilityId?: string;
 
   @ApiProperty()
   @IsOptional()
-  @IsEnum(Role)
+  // @IsEnum(Role)
   role?: Role;
 }
 
@@ -287,4 +321,26 @@ export class UpdateUserStatusDto {
   @ApiProperty({ description: "Set true to activate, false to inactivate" })
   @IsBoolean()
   isActive: boolean;
+
+  @ApiProperty({
+    description: "Unassign user from company and facility if inactivating",
+    required: false,
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  shouldUnassign?: boolean;
+}
+
+export class OperatorByFacilitiesDto {
+  @ApiProperty({ type: [String], description: "Array of Facility IDs" })
+  @IsArray()
+  @IsOptional()
+  // @IsMongoId({ each: true })
+  facilityIds: string[];
+
+  @ApiProperty({ type: String, description: "Company ID" })
+  @IsOptional()
+  // @IsMongoId({ each: true })
+  companyId: string;
 }

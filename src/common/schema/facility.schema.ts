@@ -44,7 +44,7 @@ export class Facility {
   @Prop()
   timezone: string;
 
-  @Prop({ required: true, default: false })
+  @Prop({ required: true, default: true })
   isActive: boolean;
 
   @Prop({ required: true, default: false })

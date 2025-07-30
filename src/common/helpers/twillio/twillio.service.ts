@@ -4,6 +4,7 @@ dotenv.config();
 const accountSid = process.env.ACCOUNT_SID;
 const authToken = process.env.AUTH_TOKEN;
 import * as twilio from "twilio";
+import { TypeExceptions } from "../exceptions";
 const client = twilio(accountSid, authToken);
 
 // Helper function to format the phone number into E.164 format
@@ -48,5 +49,36 @@ export const verifyOTP = async (phoneNumber: string, code: string) => {
     }
   } catch (error) {
     return { success: false, error: error.message };
+  }
+};
+
+export const validateUSMobileNumber = async (phone: string) => {
+  try {
+    const formattedPhone = formatPhoneNumber(phone);
+    // Use the same client instance you've already created
+    const lookup = await client.lookups.v1
+      .phoneNumbers(formattedPhone)
+      .fetch({ type: ["carrier"] });
+
+    const carrierType = lookup.carrier?.type;
+
+    const isMobile =
+      typeof carrierType === "string" && carrierType === "mobile";
+
+    if (!lookup.phoneNumber) {
+      throw TypeExceptions.BadRequestCommonFunction("Invalid phone number");
+    }
+
+    if (!isMobile) {
+      throw TypeExceptions.BadRequestCommonFunction(
+        "Phone number is not a mobile number",
+      );
+    }
+
+    // Passed all checks
+    return { success: true };
+  } catch (err) {
+    console.error("Phone number validation failed:", err.message);
+    return { success: false, error: err.message };
   }
 };

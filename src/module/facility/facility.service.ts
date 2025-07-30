@@ -4,6 +4,7 @@ import mongoose, { FilterQuery, Model } from "mongoose";
 import {
   RESPONSE_ERROR,
   RESPONSE_SUCCESS,
+  USER,
 } from "src/common/constants/response.constant";
 import { TABLE_NAMES } from "src/common/constants/table-name.constant";
 
@@ -12,12 +13,22 @@ import { Chiller } from "src/common/schema/chiller.schema";
 import { Company } from "src/common/schema/company.schema";
 import { Facility, FacilityDocument } from "src/common/schema/facility.schema";
 import {
+  ActiveFacilities,
   CreateFacilityDTO,
   FacilityListDto,
   UpdateFacilityDto,
   UpdateFacilityStatusDto,
 } from "./dto/facility.dto";
 import { CreateChillerWithFacilityDTO } from "../chiller/dto/chiller.dto";
+import {
+  CHILLER_STATUS,
+  ChillerStatus,
+  MEASUREMENT_UNITS,
+  Role,
+} from "src/common/constants/enum.constant";
+import { User } from "src/common/schema/user.schema";
+import { facilityStatusTemplate } from "src/common/helpers/email/emailTemplates/facilityStatusTemplate";
+import { EmailService } from "src/common/helpers/email/email.service";
 
 @Injectable()
 export class FacilityService {
@@ -25,6 +36,8 @@ export class FacilityService {
     @InjectModel(Facility.name) private readonly facilityModel: Model<Facility>,
     @InjectModel(Chiller.name) private readonly chillerModel: Model<Chiller>,
     @InjectModel(Company.name) private readonly companyModel: Model<Company>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
+    private emailService: EmailService,
   ) {}
   async create(createFacilityDto: CreateFacilityDTO) {
     // const { companyId, name, chillers, ...facilityDetails } = createFacilityDto;
@@ -121,17 +134,43 @@ export class FacilityService {
       if (chillers && chillers.length > 0) {
         const chillerDocs = chillers.map(
           (chiller: CreateChillerWithFacilityDTO) => {
-            const tonsValue =
-              typeof chiller.kwr === "number" ? chiller.kwr : chiller.tons;
+            // const tonsValue =
+            //   typeof chiller.kwr === "number" &&
+            //   chiller.unit === MEASUREMENT_UNITS.SIMetric
+            //     ? parseFloat((chiller.kwr / 3.51685).toFixed(2))
+            //     : chiller.tons;
 
+            // const { name: chillerName, ...rest } = chiller;
+
+            // return {
+            //   ...rest,
+            //   chillerNo: chillerName, // set chillerNo from name
+            //   tons: tonsValue,
+            //   facilityId: createdFacility._id,
+            //   companyId: companyObjectId,
+            //   status: CHILLER_STATUS.Pending,
+            // };
             return {
-              ...chiller,
-              tons: tonsValue,
-              facilityId: createdFacility._id,
+              ChillerNo: chiller.name, // ✅ save name as ChillerNo (case-sensitive)
+              unit: chiller.unit,
+              weeklyHours: chiller.weeklyHours,
+              weeksPerYear: chiller.weeksPerYear,
+              avgLoadProfile: chiller.avgLoadProfile,
+              make: chiller.make,
+              model: chiller.model,
+              serialNumber: chiller.serialNumber,
+              manufacturedYear: chiller.manufacturedYear,
+              refrigType: chiller.refrigType,
+              tons: chiller.tons,
+              kwr: chiller.kwr,
+              energyCost: chiller.energyCost,
               companyId: companyObjectId,
+              facilityId: createdFacility._id,
+              status: CHILLER_STATUS.Pending,
             };
           },
         );
+        console.log("✌️chillerDocs --->", chillerDocs);
 
         const createdChillers = await this.chillerModel.create(chillerDocs);
         const chillerIds: mongoose.Types.ObjectId[] = [];
@@ -166,7 +205,10 @@ export class FacilityService {
         },
       );
 
-      return this.facilityModel.findById(createdFacility._id);
+      return this.facilityModel.findById(createdFacility._id).populate({
+        path: "chillers",
+        select: "-__v",
+      });
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
@@ -174,6 +216,8 @@ export class FacilityService {
 
   async findAll(req: Request, body: FacilityListDto) {
     try {
+      console.log("logged in user", req["user"]);
+
       const {
         page = 1,
         limit = 10,
@@ -187,10 +231,41 @@ export class FacilityService {
           RESPONSE_ERROR.INVALID_PAGE_AND_LIMIT_VALUE,
         );
       }
+      const findUser = await this.userModel.findOne({
+        _id: req["user"]["_id"],
+      });
+      const matchObj: FilterQuery<FacilityDocument> = { isDeleted: false };
+
+      if (!findUser) {
+        throw TypeExceptions.BadRequestCommonFunction(USER.USER_NOT_FOUND);
+      }
+
+      if (req["user"]["role"] == Role.CORPORATE_MANAGER) {
+        if (findUser.companyId) {
+          body.companyId = findUser.companyId.toString();
+        } else {
+          matchObj._id = {
+            $in: [],
+          };
+        }
+      }
+      if (
+        req["user"]["role"] == Role.FACILITY_MANAGER ||
+        req["user"]["role"] == Role.OPERATOR
+      ) {
+        let facilityIds = [];
+        if (findUser.facilityIds && findUser.facilityIds.length) {
+          facilityIds = findUser.facilityIds.map(
+            (id) => new mongoose.Types.ObjectId(id),
+          );
+        }
+        matchObj._id = {
+          $in: facilityIds,
+        };
+      }
+
       const companyId = body.companyId;
       const skip = (page - 1) * limit;
-
-      const matchObj: FilterQuery<FacilityDocument> = { isDeleted: false };
 
       if (companyId) {
         const existingCompany = await this.companyModel.findById(companyId);
@@ -233,16 +308,39 @@ export class FacilityService {
             name: { $first: "$name" },
             address: {
               $first: {
+                // $concat: [
+                //   '$address1',
+                //   ', ',
+                //   {
+                //     $cond: {
+                //       if: {
+                //         $ne: ['$address2', ''],
+                //       },
+                //       then: { $concat: ['$address2', ', '] },
+                //       else: '',
+                //     },
+                //   },
+                //   '$city',
+                //   ', ',
+                //   '$state',
+                //   ', ',
+                //   '$country',
+                // ],
                 $concat: [
-                  "$address1",
+                  { $ifNull: ["$address1", ""] },
                   ", ",
-                  "$address2",
+                  {
+                    $cond: {
+                      if: { $ne: [{ $ifNull: ["$address2", ""] }, ""] },
+                      then: { $concat: [{ $ifNull: ["$address2", ""] }, ", "] },
+                      else: "",
+                    },
+                  },
+                  { $ifNull: ["$city", ""] },
                   ", ",
-                  "$city",
+                  { $ifNull: ["$state", ""] },
                   ", ",
-                  "$state",
-                  ", ",
-                  "$country",
+                  { $ifNull: ["$country", ""] },
                 ],
               },
             },
@@ -322,16 +420,45 @@ export class FacilityService {
     }
   }
 
-  async findAllFacilities(companyId: string) {
+  async findAllFacilities(req: Request, companyId: string) {
     try {
+      const findUser = await this.userModel.findOne({
+        _id: req["user"]["_id"],
+      });
+      if (!findUser) {
+        throw TypeExceptions.BadRequestCommonFunction(USER.USER_NOT_FOUND);
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const filter: any = {};
+
+      if (req["user"]["role"] == Role.CORPORATE_MANAGER) {
+        if (findUser.companyId) {
+          companyId = findUser.companyId.toString();
+        } else {
+          filter["_id"] = { $in: [] };
+        }
+      }
       if (companyId?.trim()) {
         filter.companyId = new mongoose.Types.ObjectId(companyId);
       }
+
+      if (
+        req["user"]["role"] == Role.FACILITY_MANAGER ||
+        req["user"]["role"] == Role.OPERATOR
+      ) {
+        let facilityIds = [];
+        if (findUser.facilityIds && findUser.facilityIds.length) {
+          facilityIds = findUser.facilityIds.map(
+            (id) => new mongoose.Types.ObjectId(id),
+          );
+        }
+        filter["_id"] = { $in: facilityIds };
+      }
+
       const facilities = await this.facilityModel
         .find(filter)
         .select("_id name companyId"); // <-- select only needed fields
+      console.log("facilities: =======", facilities);
       return facilities;
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
@@ -378,6 +505,12 @@ export class FacilityService {
           as: "chillers", // The result of the join will be populated under 'chillers'
         },
       });
+      // pipeline.push({
+      //   $unwind: {
+      //     path: "$chillers",
+      //     preserveNullAndEmptyArrays: true, // In case company is missing
+      //   },
+      // });
 
       pipeline.push({
         $lookup: {
@@ -402,15 +535,20 @@ export class FacilityService {
           // address: 1,
           address: {
             $concat: [
-              "$address1",
+              { $ifNull: ["$address1", ""] },
               ", ",
-              "$address2",
+              {
+                $cond: {
+                  if: { $ne: [{ $ifNull: ["$address2", ""] }, ""] },
+                  then: { $concat: [{ $ifNull: ["$address2", ""] }, ", "] },
+                  else: "",
+                },
+              },
+              { $ifNull: ["$city", ""] },
               ", ",
-              "$city",
+              { $ifNull: ["$state", ""] },
               ", ",
-              "$state",
-              ", ",
-              "$country",
+              { $ifNull: ["$country", ""] },
             ],
           },
           companyId: 1,
@@ -439,7 +577,23 @@ export class FacilityService {
 
       // Step 6: Return the result
       if (result.length) {
-        return result[0]; // Return the first result as the response
+        // return result[0]; // Return the first result as the response
+        const facility = result[0];
+        // facility.chillers = facility.chillers.map((chiller) => {
+        //   if (
+        //     typeof chiller.tons === "number" &&
+        //     typeof chiller.unit === "string" &&
+        //     chiller.unit.toLowerCase().includes("si")
+        //   ) {
+        //     return {
+        //       ...chiller,
+        //       tons: parseFloat((chiller.tons * 3.51685).toFixed(2)), // return kwr in same field
+        //     };
+        //   }
+        //   return chiller;
+        // });
+
+        return facility;
       } else {
         throw TypeExceptions.BadRequestCommonFunction(
           RESPONSE_ERROR.FACILITY_NOT_FOUND,
@@ -632,7 +786,8 @@ export class FacilityService {
         // b. Check for existing chillers with same name
         const existingChillers = await this.chillerModel.find({
           facilityId: new mongoose.Types.ObjectId(id),
-          name: { $in: chillerNames },
+          // name: { $in: chillerNames },
+          chillerNo: { $in: chillerNames },
           isDeleted: false,
         });
         if (existingChillers.length > 0) {
@@ -649,12 +804,57 @@ export class FacilityService {
         // }));
 
         const chillersToCreate = chillers.map((c) => {
-          const tonsValue = typeof c.kwr === "number" ? c.kwr : c.tons;
+          // const tonsValue =
+          //   typeof c.kwr === 'number' && c.unit === MEASUREMENT_UNITS.SIMetric
+          //     ? parseFloat((c.kwr / 3.51685).toFixed(2))
+          //     : c.tons;
+          // const { name, ...rest } = c;
+          // console.log('✌️tonsValue --->', tonsValue);
+
+          // return {
+          //   ...rest,
+          //   ChillerNo: name,
+          //   tons: tonsValue,
+          //   facilityId: new mongoose.Types.ObjectId(id),
+          //   companyId: existingFacility.companyId,
+          // };
+          const { name, kwr, unit, ...rest } = c;
+
+          // const tonsValue =
+          //   unit === MEASUREMENT_UNITS.SIMetric && typeof kwr === 'number'
+          //     ? parseFloat((kwr / 3.51685).toFixed(2))
+          //     : tons;
+          // let tonsValue: number;
+
+          console.log("✌️unit --->", unit);
+          console.log("✌️kwr --->", kwr);
+          console.log(
+            "✌️MEASUREMENT_UNITS.SIMetric --->",
+            MEASUREMENT_UNITS.SIMetric,
+          );
+          // if (unit === MEASUREMENT_UNITS.SIMetric && typeof kwr === 'number') {
+          //   console.log('IIIIIIIIIIIIII');
+
+          //   tonsValue = kwr / 3.51685;
+          // } else if (
+          //   unit === MEASUREMENT_UNITS.English &&
+          //   typeof tons === 'number'
+          // ) {
+          //   console.log('@@@@@@@@@@@@');
+
+          //   tonsValue = tons;
+          // } else {
+          //   tonsValue = 0; // fallback to 0 or throw error if needed
+          // }
+          // console.log('✌️tonsValue --->', tonsValue);
+
           return {
-            ...c,
-            tons: tonsValue,
+            ...rest,
+            ChillerNo: name,
+            unit,
             facilityId: new mongoose.Types.ObjectId(id),
             companyId: existingFacility.companyId,
+            status: ChillerStatus.Pending,
           };
         });
 
@@ -665,6 +865,11 @@ export class FacilityService {
         const chillerIds = existingFacility.chillers || [];
         for (const chiller of createdChillers) {
           await chiller.save();
+          await this.companyModel.updateOne(
+            { _id: new mongoose.Types.ObjectId(chiller?.companyId) },
+            { $inc: { totalChiller: 1 } },
+          );
+
           chillerIds.push(chiller._id);
         }
 
@@ -738,7 +943,65 @@ export class FacilityService {
             isDeleted: 1,
             createdAt: 1,
             updatedAt: 1,
-            chillers: 1,
+            chillers: {
+              $map: {
+                input: "$chillers",
+                as: "ch",
+                in: {
+                  _id: "$$ch._id",
+                  ChillerNo: "$$ch.ChillerNo",
+                  unit: "$$ch.unit",
+                  weeklyHours: "$$ch.weeklyHours",
+                  weeksPerYear: "$$ch.weeksPerYear",
+                  avgLoadProfile: "$$ch.avgLoadProfile",
+                  make: "$$ch.make",
+                  model: "$$ch.model",
+                  serialNumber: "$$ch.serialNumber",
+                  manufacturedYear: "$$ch.manufacturedYear",
+                  refrigType: "$$ch.refrigType",
+                  tons: "$$ch.tons",
+                  kwr: "$$ch.kwr",
+                  // tons: {
+                  //   $cond: {
+                  //     if: { $eq: ['$$ch.unit', 'SI Metric'] },
+                  //     then: {
+                  //       $round: [{ $multiply: ['$$ch.tons', 3.51685] }, 2],
+                  //     }, // kwr
+                  //     else: '$$ch.tons',
+                  //   },
+                  // },
+                  // tons: {
+                  //   $cond: {
+                  //     if: {
+                  //       $regexMatch: {
+                  //         input: { $toLower: '$$ch.unit' },
+                  //         regex: '^si.*metric$', // matches variations of SI Metric
+                  //       },
+                  //     },
+                  //     then: {
+                  //       $round: [{ $multiply: ['$$ch.tons', 3.51685] }, 2], // convert back to kwr
+                  //     },
+                  //     else: '$$ch.tons',
+                  //   },
+                  // },
+
+                  // tons: {
+                  //   $cond: [
+                  //     { $eq: ['$$ch.unit', 'SI Metric'] },
+                  //     { $round: [{ $multiply: ['$$ch.tons', 3.51685] }, 2] },
+                  //     '$$ch.tons',
+                  //   ],
+                  // },
+
+                  energyCost: "$$ch.energyCost",
+                  status: "$$ch.status",
+                  companyId: "$$ch.companyId",
+                  facilityId: "$$ch.facilityId",
+                  createdAt: "$$ch.createdAt",
+                  updatedAt: "$$ch.updatedAt",
+                },
+              },
+            },
           },
         },
       ];
@@ -750,7 +1013,26 @@ export class FacilityService {
         );
       }
 
-      return result[0];
+      // return result[0];
+      const facility = result[0];
+      // facility.chillers = facility.chillers.map((chiller) => {
+      //   if (
+      //     typeof chiller.tons === 'number' &&
+      //     typeof chiller.unit === 'string' &&
+      //     chiller.unit.toLowerCase().includes('si')
+      //   ) {
+      //     return chiller;
+      //     // {
+      //     //   ...chiller,
+      //     //   tons: parseFloat((chiller.tons * 3.51685).toFixed(2)), // return kwr in same field
+      //     // };
+      //   }
+      //   console.log('✌️chiller --->', chiller);
+      //   return chiller;
+      // });
+
+      console.log("✌️facility --->", facility);
+      return facility;
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
@@ -791,7 +1073,7 @@ export class FacilityService {
         if (facility.chillers && facility.chillers.length > 0) {
           await this.chillerModel.updateMany(
             { _id: { $in: facility.chillers } }, // Match the chillers by their IDs
-            { $set: { isActive: false } }, // Set the isActive status of the chillers to false
+            { $set: { status: ChillerStatus.InActive } }, // Set the isActive status of the chillers to false
           );
         }
       }
@@ -802,14 +1084,55 @@ export class FacilityService {
 
       await facility.save();
 
-      return {
-        status: "success",
-        message: message,
-        data: {},
-      };
+      const allUsers = await this.userModel.find({
+        companyId: facility.companyId,
+      });
+
+      for (const user of allUsers) {
+        const emailHtml = facilityStatusTemplate(
+          facility.isActive,
+          { firstName: user.firstName },
+          facility.name,
+        );
+
+        await this.emailService.emailSender({
+          to: user.email,
+          subject: `Facility Status Update: ${facility.name}`,
+          html: emailHtml,
+        });
+      }
+
+      return message;
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
+  }
+
+  async findAllActiveChillers(dto: ActiveFacilities) {
+    const companyId = dto.companyId;
+
+    const existingCompany = await this.companyModel.findById(
+      new mongoose.Types.ObjectId(companyId),
+    );
+
+    if (!existingCompany) {
+      throw TypeExceptions.BadRequestCommonFunction(
+        RESPONSE_ERROR.COMPANY_NOT_FOUND,
+      );
+    }
+
+    const activeFacilities = await this.facilityModel.find({
+      companyId: existingCompany._id,
+      isActive: true,
+    });
+
+    if (activeFacilities.length == 0) {
+      throw TypeExceptions.BadRequestCommonFunction(
+        RESPONSE_ERROR.NO_ACTIVE_FACILITIES,
+      );
+    }
+
+    return activeFacilities;
   }
 
   remove(id: number) {

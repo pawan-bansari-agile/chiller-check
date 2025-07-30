@@ -5,7 +5,11 @@ import { InjectModel } from "@nestjs/mongoose";
 import * as bcrypt from "bcrypt";
 import { compareSync, hash } from "bcrypt";
 import { Request } from "express";
-import { AppEnvironment, Role } from "src/common/constants/enum.constant";
+import {
+  AppEnvironment,
+  CompanyStatus,
+  Role,
+} from "src/common/constants/enum.constant";
 import {
   AUTHENTICATION,
   RESPONSE_ERROR,
@@ -43,7 +47,16 @@ import mongoose, { Model, RootFilterQuery } from "mongoose";
 import * as dayjs from "dayjs";
 // import * as utc from "dayjs/plugin/utc";
 import * as timezone from "dayjs/plugin/timezone";
-import { sendOTP, verifyOTP } from "src/common/helpers/twillio/twillio.service";
+import {
+  sendOTP,
+  validateUSMobileNumber,
+  verifyOTP,
+} from "src/common/helpers/twillio/twillio.service";
+import { ConversionService } from "src/common/services/conversion.service";
+import { PhoneDto } from "src/common/helpers/twillio/phone.dto";
+import { Company, CompanyDocument } from "src/common/schema/company.schema";
+import { failedLoginAttemptsTemplate } from "src/module/image-upload/email-template/failedLoginAttempstsTemplate";
+import { userFailedLoginAttemptsTemplate } from "src/module/image-upload/email-template/userFailedLoginTemplate";
 
 // dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -56,7 +69,11 @@ export class AuthService {
     private readonly myLogger: LoggerService,
     private readonly cryptoService: CryptoService,
     private readonly commonService: CommonService,
+    private readonly conversionService: ConversionService,
+    private readonly emailService: EmailService,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(Company.name)
+    private readonly companyModel: Model<CompanyDocument>,
     @InjectModel(Device.name)
     private readonly deviceModel: Model<DeviceDocument>,
   ) {
@@ -72,6 +89,73 @@ export class AuthService {
       };
 
       const user = await this.userModel.findOne(matchParams);
+
+      if (!user) {
+        throw TypeExceptions.BadRequestCommonFunction(
+          RESPONSE_ERROR.USER_NOT_FOUND,
+        );
+      }
+
+      if (user.role == Role.CORPORATE_MANAGER && user.companyId) {
+        const company = await this.companyModel.findById(user.companyId);
+
+        if (!company) {
+          throw TypeExceptions.BadRequestCommonFunction(
+            RESPONSE_ERROR.COMPANY_NOT_FOUND,
+          );
+        }
+
+        // if (
+        //   company.status != CompanyStatus.ACTIVE &&
+        //   new Date() > company.freeTrialEndDate
+        // ) {
+        //   // throw TypeExceptions.BadRequestCommonFunction(
+        //   //   RESPONSE_ERROR.FREE_TRIAL_EXPIRED,
+        //   // );
+        //   return {
+        //     blockLogin: true,
+        //     message: RESPONSE_ERROR.FREE_TRIAL_EXPIRED,
+        //   };
+        // } else {
+        //   return {
+        //     message: RESPONSE_ERROR.COMPANY_INACTIVE,
+        //   };
+        // }
+        const now = new Date();
+
+        const oneMinuteLater = Date.now() + 60 * 1000;
+        console.log("✌️oneMinuteLater --->", oneMinuteLater);
+
+        const isTrialExpired =
+          company.status !== CompanyStatus.ACTIVE &&
+          company.freeTrialEndDate &&
+          now.getTime() >
+            new Date(company.freeTrialEndDate).getTime() + 60 * 1000;
+
+        if (isTrialExpired) {
+          return {
+            blockLogin: true,
+            message: RESPONSE_ERROR.FREE_TRIAL_EXPIRED,
+          };
+        }
+
+        // return {
+        // blockLogin: true,
+        // message: RESPONSE_ERROR.COMPANY_INACTIVE,
+
+        // changes regarding Demo status because demo and active user can login
+        if (company.status == CompanyStatus.IN_ACTIVE) {
+          throw TypeExceptions.BadRequestCommonFunction(
+            RESPONSE_ERROR.COMPANY_INACTIVE,
+          );
+        }
+        // };
+      }
+
+      if (!user.password) {
+        throw AuthExceptions.PendingResetPassword();
+      }
+
       if (!user) {
         throw AuthExceptions.AccountNotExist();
       }
@@ -101,6 +185,35 @@ export class AuthService {
           // If failed attempts reached 3 within 1 hour, deactivate account
           if (user.failedLoginAttempts >= 3) {
             user.isActive = false;
+
+            const adminSubAdminUser = await this.userModel.find({
+              role: { $in: [Role.ADMIN, Role.SUB_ADMIN] },
+            });
+            const userFullName = `${user.firstName} ${user.lastName}`;
+
+            for (const element of adminSubAdminUser) {
+              const adminSubAdminName = `${element.firstName} ${element.lastName}`;
+
+              const html = failedLoginAttemptsTemplate(
+                userFullName,
+                user.role,
+                adminSubAdminName,
+              );
+
+              await this.emailService.emailSender({
+                to: element.email,
+                subject: `3 Failed Attempts - User Inactivated`,
+                html: html,
+              });
+            }
+
+            const userHtml = userFailedLoginAttemptsTemplate(userFullName);
+
+            await this.emailService.emailSender({
+              to: user.email,
+              subject: `3 Failed Attempts - User Inactivated`,
+              html: userHtml,
+            });
           }
           await user.save();
           if (!user.isActive) {
@@ -117,19 +230,20 @@ export class AuthService {
         deviceId: params.deviceId,
       });
 
-      if (!existingDevice) {
-        // 🚀 Device not found, trigger OTP
-        const otpResult = await sendOTP(user.phoneNumber);
-        if (!otpResult.success) {
-          throw new Error("Failed to send OTP: " + otpResult.error);
+      if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
+        if (!existingDevice) {
+          // 🚀 Device not found, trigger OTP
+          const otpResult = await sendOTP(user.phoneNumber);
+          if (!otpResult.success) {
+            throw new Error("Failed to send OTP: " + otpResult.error);
+          }
+          return {
+            userId: user._id,
+            otpSent: true,
+            message: AUTHENTICATION.OTP_SEND,
+          };
         }
-        return {
-          userId: user._id,
-          otpSent: true,
-          message: AUTHENTICATION.OTP_SEND,
-        };
       }
-
       const accessToken = await this.generateAuthToken(user);
       const cryptoEncrypt = this.cryptoService.encryptData(accessToken);
       const createDeviceObj: CreateDeviceInterface = {
@@ -159,10 +273,12 @@ export class AuthService {
         deviceType: params.deviceType,
         profileImage: user.profileImage,
         permissions: user.permissions,
+        companyId: user?.companyId ? user?.companyId?.toString() : undefined,
       };
+
       await this.userModel.findOneAndUpdate(
         { _id: user._id },
-        { lastLoginTime: new Date().toISOString() },
+        { lastLoginTime: new Date().toISOString(), isProfileUpdated: false },
       );
 
       return finalRes;
@@ -197,13 +313,20 @@ export class AuthService {
       const masterOTP = process.env.MASTER_OTP;
 
       if (body.otp !== masterOTP) {
-        if (process.env.APP_ENV === AppEnvironment.PRODUCTION) {
+        if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
           const otpVerifyResult = await verifyOTP(user.phoneNumber, body.otp);
           if (!otpVerifyResult.success) {
             throw new Error("Please enter valid OTP.");
           }
         }
       }
+
+      // if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
+      //   const otpVerifyResult = await verifyOTP(user.phoneNumber, body.otp);
+      //   if (!otpVerifyResult.success) {
+      //     throw new Error('Please enter valid OTP.');
+      //   }
+      // }
       const accessToken = await this.generateAuthToken(user);
       const cryptoEncrypt = this.cryptoService.encryptData(accessToken);
       const createDeviceObj: CreateDeviceInterface = {
@@ -229,10 +352,12 @@ export class AuthService {
         deviceType: body.deviceType,
         profileImage: user.profileImage,
         permissions: user.permissions,
+        companyId: user?.companyId ? user?.companyId?.toString() : undefined,
       };
+
       await this.userModel.findOneAndUpdate(
         { _id: user._id },
-        { lastLoginTime: new Date().toISOString() },
+        { lastLoginTime: new Date().toISOString(), isProfileUpdated: false },
       );
       return finalRes;
     } catch (error) {
@@ -248,33 +373,6 @@ export class AuthService {
     return this.jwtService.sign(payload);
   }
 
-  // async createInitialUser(): Promise<void> {
-  //   const user = await this.userModel.findOne({
-  //     email: this.configService.get("database.initialUser.email"),
-  //   });
-
-  //   if (user) {
-  //     this.myLogger.customLog(RESPONSE_SUCCESS.INITIAL_USER_ALREADY_LOADED);
-  //   } else {
-  //     const params: CreateInitialUserInterface = {
-  //       firstName: this.configService.get("database.initialUser.firstName"),
-  //       lastName: this.configService.get("database.initialUser.lastName"),
-  //       email: this.configService.get("database.initialUser.email"),
-  //       role: Role.ADMIN,
-  //       phoneNumber: this.configService.get("database.initialUser.phoneNumber"),
-  //     };
-
-  //     const encryptedPassword = await hash(
-  //       this.configService.get("database.initialUser.password"),
-  //       Number(process.env.PASSWORD_SALT),
-  //     );
-
-  //     params.password = encryptedPassword;
-
-  //     this.userModel.create(params);
-  //     this.myLogger.log(RESPONSE_SUCCESS.INITIAL_USER_LOADED);
-  //   }
-  // }
   async createInitialUser(): Promise<void> {
     const usersToCreate = [
       {
@@ -284,7 +382,13 @@ export class AuthService {
         role: Role.ADMIN,
       },
       {
-        configKey: "database.larry",
+        configKey: "database.testUser",
+        logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
+        logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
+        role: Role.ADMIN, // change this role accordingly
+      },
+      {
+        configKey: "database.sauravUser",
         logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
         logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
         role: Role.ADMIN, // change this role accordingly
@@ -345,11 +449,20 @@ export class AuthService {
         ),
         role: userConfig.role,
         password: hashedPassword,
+        isActive: this.configService.get(`${userConfig.configKey}.isActive`),
       };
 
       await this.userModel.create(userData);
       this.myLogger.log(userConfig.logSuccess);
     }
+  }
+
+  async importConversionData() {
+    await this.conversionService.loadConversionDataIfNeeded();
+  }
+
+  async importAltitudeCorrectionData() {
+    await this.conversionService.loadAltitudeCorrectionIfNeeded();
   }
 
   /**
@@ -412,12 +525,13 @@ export class AuthService {
       const user = await this.userModel.findOne(matchParams);
 
       if (!user) {
+        console.log("inside the user existance check");
         throw AuthExceptions.AccountNotExist();
       }
 
-      if (!user.isActive) {
-        throw AuthExceptions.AccountNotActive();
-      }
+      // if (!user.isActive) {
+      //   throw AuthExceptions.AccountNotActive();
+      // }
 
       const passwordResetToken = this.commonService.generateRandomString(
         15,
@@ -437,19 +551,39 @@ export class AuthService {
         },
       );
 
-      await new EmailService().emailSender({
-        to: user.email.toLowerCase(),
-        html: resetPasswordTemplate(
-          `${process.env.ADMIN_URL}/reset-password/${passwordResetToken}`,
-          `${user.firstName} ${user.lastName}`,
-        ),
-        subject: "Password Reset | Chiller check",
-      });
+      if (
+        process.env.APP_ENV === AppEnvironment.DEVELOPMENT ||
+        process.env.APP_ENV === AppEnvironment.PRODUCTION
+      ) {
+        await new EmailService().emailSender({
+          to: user.email.toLowerCase(),
+          html: resetPasswordTemplate(
+            `${process.env.ADMIN_URL}/reset-password/${passwordResetToken}`,
+            `${user.firstName} ${user.lastName}`,
+          ),
+          subject: "Password Reset | Chiller check",
+        });
 
-      return {
-        _id: user._id,
-        resetPasswordToken: passwordResetToken,
-      };
+        return {
+          _id: user._id,
+          resetPasswordToken: passwordResetToken,
+        };
+      } else {
+        const emailTemplate = await new EmailService().emailSender({
+          to: user.email.toLowerCase(),
+          html: resetPasswordTemplate(
+            `${process.env.ADMIN_URL}/reset-password/${passwordResetToken}`,
+            `${user.firstName} ${user.lastName}`,
+          ),
+          subject: "Password Reset | Chiller check",
+        });
+
+        return {
+          _id: user._id,
+          resetPasswordToken: passwordResetToken,
+          emailTemplate: emailTemplate,
+        };
+      }
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
@@ -459,15 +593,17 @@ export class AuthService {
     try {
       const user = await this.userModel.findOne({
         resetPasswordToken: body.resetPasswordToken,
-        isActive: true,
+        // isActive: false,
         isDeleted: false,
       });
 
       if (!user) {
+        console.log("inside the user existance check from reset password");
         throw AuthExceptions.PasswordResetTokenExpired();
       }
 
       if (Date.now() > new Date(user.resetPasswordExpires).getTime()) {
+        console.log("inside the reset password date time check");
         throw AuthExceptions.PasswordResetTokenExpired();
       }
 
@@ -484,6 +620,7 @@ export class AuthService {
           password: encryptedPassword,
           resetPasswordToken: null,
           resetPasswordExpires: null,
+          isActive: true,
         },
       );
 
@@ -533,6 +670,14 @@ export class AuthService {
       } else {
         throw CustomError.UnknownError(error?.message, error?.status);
       }
+    }
+  }
+
+  async validateUSMobileNumber(phone: PhoneDto) {
+    try {
+      return await validateUSMobileNumber(phone.phone);
+    } catch (error) {
+      throw CustomError.UnknownError(error?.message, error?.status);
     }
   }
 }

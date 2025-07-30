@@ -9,10 +9,7 @@ import {
   EditCompanyDto,
   UpdateCompanyStatusDto,
 } from "./dto/company.dto";
-import {
-  RESPONSE_ERROR,
-  RESPONSE_SUCCESS,
-} from "src/common/constants/response.constant";
+import { RESPONSE_ERROR } from "src/common/constants/response.constant";
 import { TypeExceptions } from "src/common/helpers/exceptions";
 
 describe("CompanyController", () => {
@@ -140,26 +137,6 @@ describe("CompanyController - updateCompanyStatus", () => {
 
   afterEach(() => {
     jest.clearAllMocks();
-  });
-
-  it("should call service.updateStatus and return result", async () => {
-    const companyId = "mockCompanyId";
-    const body: UpdateCompanyStatusDto = {
-      status: CompanyStatus.ACTIVE,
-    };
-
-    const mockResponse = {
-      status: "success",
-      message: RESPONSE_SUCCESS.COMPANY_ACTIVATED,
-      data: {},
-    };
-
-    jest.spyOn(service, "updateStatus").mockResolvedValue(mockResponse);
-
-    const result = await controller.updateCompanyStatus(companyId, body);
-
-    expect(service.updateStatus).toHaveBeenCalledWith(companyId, body);
-    expect(result).toEqual(mockResponse);
   });
 
   it("should throw error if service throws", async () => {

@@ -25,11 +25,11 @@ export class Chiller {
   @Prop()
   unit: string;
 
-  @Prop()
-  name: string;
+  // @Prop()
+  // name: string;
 
   @Prop()
-  ChillerNo: number;
+  ChillerNo: string;
 
   @Prop()
   weeklyHours: number;
@@ -44,12 +44,12 @@ export class Chiller {
   desInletWaterTemp: string;
 
   @Prop()
-  make: number;
+  make: string;
 
   @Prop()
   model: string;
 
-  @Prop({ required: false, default: true })
+  @Prop({ required: false })
   status: string;
 
   @Prop({ required: true, default: false })
@@ -63,6 +63,9 @@ export class Chiller {
 
   @Prop()
   tons: number;
+
+  @Prop()
+  kwr: number;
 
   @Prop()
   efficiencyRating: number;
@@ -86,16 +89,16 @@ export class Chiller {
   designVoltage: number;
 
   @Prop()
-  voltageChoice: number;
+  voltageChoice: string;
 
   @Prop()
   fullLoadAmps: number;
 
   @Prop()
-  ampChoice: number;
+  ampChoice: string;
 
   @Prop()
-  condDPDrop: string;
+  condDPDrop: number;
 
   @Prop()
   condDPDropUnit: string;
@@ -110,7 +113,7 @@ export class Chiller {
   condApproach: number;
 
   @Prop()
-  evapDPDrop: string;
+  evapDPDrop: number;
 
   @Prop()
   evapDPDropUnit: string;
@@ -128,7 +131,7 @@ export class Chiller {
   evapDOWTemp: number;
 
   @Prop()
-  compOPIndicator: number;
+  compOPIndicator: string;
 
   @Prop()
   userNote: string;
@@ -143,7 +146,7 @@ export class Chiller {
   purgeReadingUnit: string;
 
   @Prop()
-  haveBearingTemp: string;
+  haveBearingTemp: boolean;
 
   @Prop()
   useRunHours: string;
@@ -161,7 +164,7 @@ export class Chiller {
   oilPresDifUnit: string;
 
   @Prop()
-  condDesignDeltaT: string;
+  condDesignDeltaT: number;
 
   @Prop()
   condDesignFlow: number;

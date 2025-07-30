@@ -27,6 +27,7 @@ import {
   CompanyListDto,
   CreateCompanyDto,
   EditCompanyDto,
+  UnassignedCompanyListDto,
   UpdateCompanyStatusDto,
 } from "./dto/company.dto";
 import { Request } from "express";
@@ -109,8 +110,29 @@ export class CompanyController {
     description: "Forbidden: Only an Admin can create Company!",
   })
   @ResponseMessage(COMPANY.COMPANY_LIST)
-  findAllNotDeleted() {
-    return this.companyService.findAllNotDeleted();
+  findAllNotDeleted(@Req() req: Request) {
+    return this.companyService.findAllNotDeleted(req);
+  }
+
+  @Post("findAllNotAssigned")
+  // @Public()
+  @ApiBearerAuth()
+  @ApiOkResponse({
+    schema: {
+      example: {
+        status: 200,
+        description: "Company List fetched successfully",
+        message: COMPANY.COMPANY_LIST,
+      },
+    },
+  })
+  @ApiResponse({
+    status: 403,
+    description: "Forbidden: Only an Admin can create Company!",
+  })
+  @ResponseMessage(COMPANY.COMPANY_LIST)
+  findAllNotAssigned(@Body() body: UnassignedCompanyListDto) {
+    return this.companyService.findAllNotAssigned(body);
   }
 
   @Get(":id")
@@ -132,7 +154,7 @@ export class CompanyController {
     status: 200,
     description: "Company status updated successfully.",
   })
-  @ResponseMessage(COMPANY.COMPANY_STATUS_UPDATED)
+  // @ResponseMessage(COMPANY.COMPANY_STATUS_UPDATED)
   async updateCompanyStatus(
     @Param("companyId") companyId: string, // Company ID from the URL parameter
     @Body() body: UpdateCompanyStatusDto, // Request body with new status
@@ -157,5 +179,26 @@ export class CompanyController {
     @Body() body: EditCompanyDto, // Request body with new status
   ) {
     return this.companyService.updateCompany(id, body);
+  }
+
+  @Get("findAll/activeCompanies")
+  // @Public()
+  @ApiBearerAuth()
+  @ApiOkResponse({
+    schema: {
+      example: {
+        status: 200,
+        description: "All Active Company listed",
+        message: COMPANY.ACTIVE_COMPANY_LISTED,
+      },
+    },
+  })
+  @ApiResponse({
+    status: 403,
+    description: "Forbidden: Only an Admin can list company!",
+  })
+  @ResponseMessage(COMPANY.ACTIVE_COMPANY_LISTED)
+  findAllActiveChillers() {
+    return this.companyService.findAllActiveCompany();
   }
 }

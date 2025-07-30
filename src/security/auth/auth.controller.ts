@@ -28,6 +28,7 @@ import {
 } from "../../common/dto/common.dto";
 import { Public } from "./auth.decorator";
 import { AuthService } from "./auth.service";
+import { PhoneDto } from "src/common/helpers/twillio/phone.dto";
 
 @Controller("auth")
 @ApiTags("Auth")
@@ -186,5 +187,18 @@ export class AuthController {
   @Post("/changePassword")
   async changePassword(@Body() body: ChangePasswordDto, @Req() req: Request) {
     return await this.authService.changePassword(body, req);
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Verify User Phone Number",
+    description: `
+        Used to check if the entered phone number exists, valid and can receive an OTP
+        `,
+  })
+  // @ResponseMessage(RESPONSE_SUCCESS.PHONE_VERIFIED)
+  @Post("validateUSMobileNumber")
+  async validateUSMobileNumber(@Body() phone: PhoneDto) {
+    return await this.authService.validateUSMobileNumber(phone);
   }
 }

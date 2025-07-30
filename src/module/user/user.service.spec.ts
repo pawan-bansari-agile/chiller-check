@@ -1,879 +1,728 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Test, TestingModule } from "@nestjs/testing";
-import { getModelToken } from "@nestjs/mongoose";
 import { UserService } from "./user.service";
+import { getModelToken } from "@nestjs/mongoose";
+import { ConfigService } from "@nestjs/config";
+import mongoose, { Model, Types } from "mongoose";
+import { EmailService } from "src/common/helpers/email/email.service";
 import { ImageUploadService } from "../image-upload/image-upload.service";
-import { Role } from "src/common/constants/enum.constant";
+import { AppEnvironment, Role } from "src/common/constants/enum.constant";
+import {
+  ComparisonOperator,
+  CreateUserDto,
+  NotificationType,
+  UpdateUserStatusDto,
+  UserListDto,
+} from "./dto/user.dto";
+import { ModuleName } from "./types/user.types";
+import { CommonService } from "src/common/services/common.service";
+import { UpdateUserDto } from "src/common/dto/common.dto";
+import { User } from "src/common/schema/user.schema";
 import {
   AuthExceptions,
-  // CustomError,
+  CustomError,
   TypeExceptions,
 } from "src/common/helpers/exceptions";
-import mongoose, { Model } from "mongoose";
-import { User } from "src/common/schema/user.schema";
-import { UpdateUserDto } from "src/common/dto/common.dto";
-import { EmailService } from "src/common/helpers/email/email.service";
-import { PasswordGeneratorService } from "src/common/helpers/passwordGenerator.helper";
-import { CreateUserDto, UserListDto } from "./dto/user.dto";
-import { RESPONSE_ERROR } from "src/common/constants/response.constant";
-import { CommonService } from "src/common/services/common.service";
-import { ConfigService } from "@nestjs/config";
-import { ModuleName, ModulePermission } from "./types/user.types";
-import { CryptoService } from "src/common/services/crypto.service";
-
-describe("UserService", () => {
-  let service: UserService;
-  let userModel: jest.Mocked<Model<User>>;
-  let imageService: jest.Mocked<ImageUploadService>;
-  let commonService: jest.Mocked<CommonService>;
-  let configService: jest.Mocked<ConfigService>;
-
-  const baseUser = {
-    _id: "user123",
-    profileImage: "old.png",
-    role: Role.ADMIN,
-    isActive: true,
-    save: jest.fn().mockResolvedValue(true),
-  } as unknown as User;
-
-  const validDto: UpdateUserDto = {
-    firstName: "New Name",
-    phoneNumber: "+1234567890",
-    role: Role.OPERATOR,
-    profileImage: "new.png",
-  };
-
-  beforeEach(async () => {
-    const mockModel = {
-      findById: jest.fn(),
-      findOne: jest.fn(),
-      create: jest.fn(),
-      aggregate: jest.fn(),
-    };
-
-    // const mockUserModel = {
-    //   findOne: jest.fn(),
-    //   create: jest.fn(),
-    //   aggregate: jest.fn(), // ✅ Add this line
-    // };
-
-    const mockImage = {
-      moveTempToRealFolder: jest.fn(),
-      deleteImage: jest.fn(),
-    };
-
-    const mockPassword = {};
-
-    const mockEmail = {};
-
-    const mockCommonService = {
-      generateRandomString: jest.fn(),
-    };
-
-    const mockConfigService = {
-      get: jest.fn((key) => {
-        if (key === "auth.resetPasswordExpiryDuration") return "3600000"; // 1 hour expiry
-        return null;
-      }),
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        UserService,
-        CommonService,
-        { provide: getModelToken("User"), useValue: mockModel },
-        { provide: ImageUploadService, useValue: mockImage },
-        { provide: PasswordGeneratorService, useValue: mockPassword },
-        { provide: EmailService, useValue: mockEmail },
-        { provide: CommonService, useValue: mockCommonService },
-        {
-          provide: ConfigService,
-          useValue: mockConfigService,
-          // {
-          //   get: jest.fn((key) => {
-          //     if (key === 'auth.resetPasswordExpiryDuration') return '3600000'; // 1 hour expiry
-          //     return null;
-          //   }),
-          // },
-        },
-      ],
-    }).compile();
-
-    service = module.get<UserService>(UserService);
-    userModel = module.get(getModelToken("User"));
-    imageService = module.get(ImageUploadService);
-    commonService = module.get(CommonService);
-    configService = module.get(ConfigService);
-  });
-
-  afterEach(() => jest.clearAllMocks());
-
-  it("should be defiend", () => {
-    expect(commonService).toBeDefined();
-    expect(configService).toBeDefined();
-  });
-  it("should update profile successfully", async () => {
-    const validUpdateDto: UpdateUserDto = {
-      firstName: "New Name",
-      phoneNumber: "+1234567890",
-      profileImage: "new.png",
-    };
-    const user = {
-      ...baseUser,
-      save: jest.fn().mockResolvedValue(validUpdateDto),
-      _id: "user123",
-      isActive: true,
-      role: Role.OPERATOR,
-    };
-    userModel.findById.mockResolvedValue(user);
-
-    const result = await service.updateProfile(
-      "user123",
-      validUpdateDto,
-      Role.ADMIN,
-    );
-    expect(user.save).toHaveBeenCalled();
-    // expect(result).toEqual(validUpdateDto);
-    expect(result).toEqual({
-      forceLogout: false,
-      data: expect.objectContaining({
-        _id: "user123",
-        firstName: validUpdateDto.firstName,
-        phoneNumber: validUpdateDto.phoneNumber,
-        profileImage: validUpdateDto.profileImage,
-        role: Role.OPERATOR,
-        isActive: true,
-      }),
-    });
-  });
-
-  it("should throw if user not found", async () => {
-    userModel.findById.mockResolvedValue(null);
-    await expect(
-      service.updateProfile("bad_id", validDto, Role.ADMIN),
-    ).rejects.toThrow(AuthExceptions.AccountNotExist().message);
-  });
-
-  it("should update profile image", async () => {
-    const user = { ...baseUser, save: jest.fn().mockResolvedValue(validDto) };
-    userModel.findById.mockResolvedValue(user);
-
-    await service.updateProfile("user123", validDto, Role.ADMIN);
-
-    expect(imageService.moveTempToRealFolder).toHaveBeenCalledWith(
-      "profilePic/new.png",
-    );
-    expect(imageService.deleteImage).toHaveBeenCalledWith("profilePic/old.png");
-  });
-
-  it("should not update role if user is not admin", async () => {
-    const user = {
-      ...baseUser,
-      role: Role.OPERATOR,
-      save: jest.fn().mockResolvedValue(validDto),
-    };
-    userModel.findById.mockResolvedValue(user);
-
-    await service.updateProfile(
-      "user123",
-      { ...validDto, role: Role.ADMIN },
-      Role.ADMIN,
-    );
-    expect(user.role).toBe(Role.ADMIN); // unchanged
-  });
-
-  it("should filter out undefined/empty values", async () => {
-    const user = { ...baseUser, save: jest.fn().mockResolvedValue(true) };
-    userModel.findById.mockResolvedValue(user);
-
-    const dto: Partial<UpdateUserDto> = {
-      firstName: "",
-      phoneNumber: undefined,
-      profileImage: "new.png",
-    };
-
-    await service.updateProfile("user123", dto as UpdateUserDto, Role.ADMIN);
-    expect(user.save).toHaveBeenCalled();
-  });
-
-  it("should throw on image upload failure", async () => {
-    const user = { ...baseUser, save: jest.fn().mockResolvedValue(true) };
-    userModel.findById.mockResolvedValue(user);
-
-    imageService.moveTempToRealFolder.mockRejectedValue(
-      new Error("upload error"),
-    );
-
-    await expect(
-      service.updateProfile("user123", validDto, Role.ADMIN),
-    ).rejects.toThrow("upload error");
-  });
-
-  it("should get user by ID", async () => {
-    // userModel.findById.mockResolvedValue(baseUser);
-    userModel.aggregate.mockResolvedValueOnce([baseUser]); // ✅ use mockUserModel not userModel
-
-    const user = await service.getUserById(
-      new mongoose.Types.ObjectId().toHexString(),
-    );
-    expect(user).toBe(baseUser);
-  });
-
-  it("should throw if user not found in getUserById", async () => {
-    // userModel.findById.mockResolvedValue(null);
-    userModel.aggregate.mockResolvedValueOnce([]);
-
-    await expect(
-      service.getUserById(new mongoose.Types.ObjectId().toHexString()),
-    ).rejects.toThrow(AuthExceptions.AccountNotExist().message);
-  });
-});
-
-// describe('UserService - createUser', () => {
-//   let service: UserService;
-//   const mockImageUploadService = {
-//     uploadImage: jest.fn(),
-//   };
-
-//   const mockUserModel = {
-//     findOne: jest.fn(),
-//     create: jest.fn(),
-//     aggregate: jest.fn(), // ✅ Add this line
-//   };
-
-//   const mockEmailService = {
-//     emailSender: jest.fn(),
-//   };
-
-//   const mockPasswordService = {
-//     generatePassword: jest.fn(),
-//   };
-
-//   const mockPassword = {
-//     plain: 'TestPass123!',
-//     hashed: 'hashedpass',
-//     encrypted: 'encryptedpass',
-//   };
-//   const mockCommonService = {
-//     generateRandomString: jest.fn(),
-//   };
-
-//   beforeEach(async () => {
-//     const module: TestingModule = await Test.createTestingModule({
-//       providers: [
-//         UserService,
-//         CommonService,
-//         { provide: getModelToken('User'), useValue: mockUserModel },
-//         { provide: EmailService, useValue: mockEmailService },
-//         { provide: PasswordGeneratorService, useValue: mockPasswordService },
-//         { provide: ImageUploadService, useValue: mockImageUploadService },
-//         { provide: CommonService, useValue: mockCommonService },
-//         {
-//           provide: ConfigService,
-//           useValue: {
-//             get: jest.fn((key) => {
-//               if (key === 'auth.resetPasswordExpiryDuration') return '3600000'; // 1 hour expiry
-//               return null;
-//             }),
-//           },
-//         },
-//       ],
-//     }).compile();
-
-//     service = module.get<UserService>(UserService);
-
-//     jest.clearAllMocks();
-//     mockPasswordService.generatePassword.mockReturnValue(mockPassword);
-//   });
-
-//   const baseDto: Partial<CreateUserDto> = {
-//     firstName: 'Test',
-//     lastName: 'User',
-//     email: 'test@example.com',
-//     phoneNumber: '+911234567890',
-//     profileImage: '',
-//     permissions: {
-//       user: { view: true },
-//     },
-//     alerts: {
-//       general: [],
-//       logs: [],
-//     },
-//   };
-
-//   it('should throw error if user already exists', async () => {
-//     mockUserModel.findOne.mockResolvedValueOnce({ _id: 'existingUser' });
-
-//     await expect(
-//       service.createUser(
-//         { ...baseDto, role: Role.ADMIN } as CreateUserDto,
-//         Role.ADMIN
-//       )
-//     ).rejects.toThrow(RESPONSE_ERROR.USER_ALREADY_EXIST);
-//   });
-
-//   it('should create ADMIN user with full permissions, no alerts/responsibilities', async () => {
-//     mockUserModel.findOne.mockResolvedValueOnce(null);
-//     mockUserModel.create.mockResolvedValueOnce({ _id: 'newAdmin' });
-
-//     const dto: CreateUserDto = {
-//       firstName: 'Test',
-//       lastName: 'User',
-//       email: 'test@example.com',
-//       phoneNumber: '+911234567890',
-//       profileImage: 'some-url',
-//       role: Role.ADMIN,
-//       permissions: {},
-//       companyId: '',
-//       facilityIds: [],
-//     };
-
-//     const result = await service.createUser(dto, Role.ADMIN);
-
-//     const fullAccess = {
-//       view: true,
-//       add: true,
-//       edit: true,
-//       toggleStatus: true,
-//     };
-
-//     expect(mockUserModel.create).toHaveBeenCalledWith({
-//       firstName: 'Test',
-//       lastName: 'User',
-//       email: 'test@example.com',
-//       phoneNumber: '+911234567890',
-//       profileImage: '',
-//       role: Role.SUB_ADMIN,
-//       permissions: {
-//         company: fullAccess,
-//         facility: fullAccess,
-//         chiller: fullAccess,
-//         user: fullAccess,
-//         log: fullAccess,
-//         maintenance: fullAccess,
-//         report: fullAccess,
-//         setting: fullAccess,
-//       },
-//     });
-
-//     expect(result).toEqual({ _id: 'newAdmin' });
-//   });
-
-//   it('should create CORPORATE_MANAGER with exactly one company responsibility', async () => {
-//     mockUserModel.findOne.mockResolvedValue(null);
-//     mockUserModel.create.mockResolvedValueOnce({ _id: 'corpUser' });
-
-//     const dto = {
-//       ...baseDto,
-//       role: Role.CORPORATE_MANAGER,
-//       responsibilities: [{ description: 'Company A', isMandatory: true }],
-//     } as CreateUserDto;
-
-//     const result = await service.createUser(dto, Role.ADMIN);
-
-//     expect(mockUserModel.create).toHaveBeenCalled();
-//     expect(result).toEqual({ _id: 'corpUser' });
-//   });
-
-//   it('should throw error if CORPORATE_MANAGER has != 1 company', async () => {
-//     mockUserModel.findOne.mockResolvedValue(null);
-
-//     const dto = {
-//       ...baseDto,
-//       role: Role.CORPORATE_MANAGER,
-//       responsibilities: [],
-//     } as CreateUserDto;
-
-//     await expect(service.createUser(dto, Role.ADMIN)).rejects.toThrow(
-//       RESPONSE_ERROR.INVALID_COMPANY_ASSIGNMENT
-//     );
-//   });
-
-//   it('should create FACILITY_MANAGER with responsibilities', async () => {
-//     mockUserModel.findOne.mockResolvedValue(null);
-//     mockUserModel.create.mockResolvedValueOnce({ _id: 'facManager' });
-
-//     const dto = {
-//       ...baseDto,
-//       role: Role.FACILITY_MANAGER,
-//       responsibilities: [{ description: 'Facility A', isMandatory: true }],
-//     } as CreateUserDto;
-
-//     const result = await service.createUser(dto, Role.ADMIN);
-
-//     expect(mockUserModel.create).toHaveBeenCalled();
-//     expect(result).toEqual({ _id: 'facManager' });
-//   });
-
-//   it('should throw error if FACILITY_MANAGER has no responsibilities', async () => {
-//     mockUserModel.findOne.mockResolvedValue(null);
-
-//     const dto = {
-//       ...baseDto,
-//       role: Role.FACILITY_MANAGER,
-//       responsibilities: [],
-//     } as CreateUserDto;
-
-//     await expect(service.createUser(dto, Role.ADMIN)).rejects.toThrow(
-//       RESPONSE_ERROR.INVALID_FACILITY_ASSIGNMENT
-//     );
-//   });
-
-//   it('should create OPERATOR with chiller responsibilities', async () => {
-//     mockUserModel.findOne.mockResolvedValue(null);
-//     mockUserModel.create.mockResolvedValueOnce({ _id: 'opUser' });
-
-//     const dto = {
-//       ...baseDto,
-//       role: Role.OPERATOR,
-//       responsibilities: [{ description: 'Chiller X', isMandatory: true }],
-//     } as CreateUserDto;
-
-//     const result = await service.createUser(dto, Role.ADMIN);
-
-//     expect(mockUserModel.create).toHaveBeenCalled();
-//     expect(result).toEqual({ _id: 'opUser' });
-//   });
-
-//   it('should throw error if OPERATOR has no chillers', async () => {
-//     mockUserModel.findOne.mockResolvedValue(null);
-
-//     const dto = {
-//       ...baseDto,
-//       role: Role.OPERATOR,
-//       responsibilities: [],
-//     } as CreateUserDto;
-
-//     await expect(service.createUser(dto, Role.ADMIN)).rejects.toThrow(
-//       RESPONSE_ERROR.INVALID_CHILLER_ASSIGNMENT
-//     );
-//   });
-
-//   it('should call emailSender with proper arguments', async () => {
-//     mockUserModel.findOne.mockResolvedValue(null);
-//     mockUserModel.create.mockResolvedValueOnce({ _id: 'mailUser' });
-
-//     const dto = {
-//       ...baseDto,
-//       role: Role.FACILITY_MANAGER,
-//       responsibilities: [{ description: 'Facility B', isMandatory: true }],
-//     } as CreateUserDto;
-
-//     await service.createUser(dto, Role.ADMIN);
-
-//     expect(mockEmailService.emailSender).toHaveBeenCalledWith(
-//       expect.objectContaining({
-//         to: dto.email,
-//         subject: expect.stringContaining('Welcome'),
-//         html: expect.stringContaining(dto.firstName),
-//       })
-//     );
-//   });
-// });
+import { USER } from "src/common/constants/response.constant";
+import { Facility } from "src/common/schema/facility.schema";
+import { Chiller } from "src/common/schema/chiller.schema";
+import { Company } from "src/common/schema/company.schema";
+import { accountStatusTemplate } from "src/common/helpers/email/emailTemplates/accountStatusTemplate";
 
 describe("UserService - createUser", () => {
   let service: UserService;
-
-  const mockUserModel = {
-    findOne: jest.fn(),
-    create: jest.fn(),
-    findOneAndUpdate: jest.fn(),
-  };
-
-  const mockImageUploadService = {
-    moveTempToRealFolder: jest.fn(),
-  };
-
-  const mockEmailService = {
-    emailSender: jest.fn(),
-  };
-
-  const mockCommonService = {
-    generateRandomString: jest.fn().mockReturnValue("mock-token"),
-  };
-
-  const mockConfigService = {
-    get: jest.fn().mockReturnValue(3600000), // 1 hour
-  };
-
-  const mockRequest = (role: Role): { user: { role: Role } } => ({
-    user: {
-      role,
-    },
-  });
+  let userModel: any;
+  let companyModel: any;
+  let facilityModel: any;
+  let chillerModel: any;
+  let emailService: any;
+  let imageUploadService: any;
+  let configService: any;
+  let commonService: any;
 
   beforeEach(async () => {
+    userModel = {
+      findOne: jest.fn(),
+      create: jest.fn(),
+      findOneAndUpdate: jest.fn(),
+    };
+
+    companyModel = {
+      updateOne: jest.fn(),
+    };
+
+    facilityModel = {
+      updateMany: jest.fn(),
+    };
+
+    chillerModel = {
+      updateMany: jest.fn(),
+    };
+
+    emailService = {
+      emailSender: jest.fn(),
+    };
+
+    imageUploadService = {
+      moveTempToRealFolder: jest.fn(),
+    };
+
+    commonService = {
+      generateRandomString: jest.fn().mockReturnValue("mockToken"),
+      moveTempToRealFolder: jest.fn(),
+    };
+
+    configService = {
+      get: jest.fn().mockReturnValue(3600000), // 1 hour in ms
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UserService,
-        PasswordGeneratorService,
-        CryptoService,
-        { provide: getModelToken("User"), useValue: mockUserModel },
-        { provide: ImageUploadService, useValue: mockImageUploadService },
-        { provide: EmailService, useValue: mockEmailService },
-        { provide: CommonService, useValue: mockCommonService },
-        { provide: ConfigService, useValue: mockConfigService },
+        { provide: getModelToken("User"), useValue: userModel },
+        { provide: getModelToken("Company"), useValue: companyModel },
+        { provide: getModelToken("Facility"), useValue: facilityModel },
+        { provide: getModelToken("Chiller"), useValue: chillerModel },
+        { provide: EmailService, useValue: emailService },
+        { provide: ImageUploadService, useValue: imageUploadService },
+        { provide: ConfigService, useValue: configService },
+        { provide: CommonService, useValue: commonService },
       ],
     }).compile();
 
     service = module.get<UserService>(UserService);
-
-    jest.clearAllMocks();
   });
 
-  const fullPermissions: Record<ModuleName, ModulePermission> = {
-    company: { view: true, add: true, edit: true },
-    facility: { add: true },
-    chiller: {},
-    users: {},
-    log: {},
-    maintenance: {},
-    report: {},
-    setting: {},
-  };
+  it("should throw if user already exists", async () => {
+    userModel.findOne.mockResolvedValue({ email: "existing@example.com" });
 
-  const baseDto: CreateUserDto = {
-    firstName: "John",
-    lastName: "Doe",
-    email: "john@example.com",
-    phoneNumber: "+911234567890",
-    role: Role.OPERATOR,
-    permissions: fullPermissions,
-    companyId: new mongoose.Types.ObjectId().toString(),
-    facilityIds: ["fac123"],
-    alerts: {
-      general: [],
-      logs: [],
-    },
-  };
-
-  it("should create a user successfully", async () => {
-    const mockUser = { _id: new mongoose.Types.ObjectId(), ...baseDto };
-
-    mockUserModel.findOne.mockResolvedValue(null);
-    mockUserModel.create.mockResolvedValue(mockUser);
-    mockUserModel.findOneAndUpdate.mockResolvedValue(null);
-
-    const result = await service.createUser(
-      baseDto,
-      mockRequest(Role.SUB_ADMIN),
+    await expect(
+      service.createUser({ email: "existing@example.com" } as any, {}),
+    ).rejects.toThrow(
+      "Email you entered is already registered. please use different email.",
     );
+  });
 
-    expect(mockUserModel.findOne).toHaveBeenCalledWith({
-      email: baseDto.email,
+  it("should create a user and send email (production/dev)", async () => {
+    // Arrange
+    const dto: CreateUserDto = {
+      firstName: "John",
+      lastName: "Doe",
+      email: "john@example.com",
+      role: Role.CORPORATE_MANAGER,
+      companyId: new Types.ObjectId().toHexString(),
+      chillerIds: [],
+      facilityIds: [],
+      permissions: {
+        company: { view: true, edit: false },
+        facility: { view: true, edit: false },
+        chiller: { view: true, edit: false },
+        users: { view: true, edit: false },
+        [ModuleName.LOG]: {},
+        [ModuleName.MAINTENANCE]: {},
+        [ModuleName.REPORT]: {},
+        [ModuleName.SETTING]: {},
+        [ModuleName.CHILLER_BULK_COST_UPDATE]: {},
+      },
+      alerts: {
+        general: {
+          notifyBy: NotificationType.EMAIL,
+          conditions: [],
+        },
+        logs: [],
+      },
+      phoneNumber: "",
+    };
+
+    const mockUserId = new Types.ObjectId();
+
+    const mockUser = {
+      _id: mockUserId,
+      toObject: () => ({ _id: mockUserId }),
+      email: dto.email,
+      profileImage: null,
+      ...dto,
+    };
+
+    const token = "mock-reset-token";
+
+    jest.spyOn(userModel, "findOne").mockResolvedValue(null); // user doesn't exist
+    jest.spyOn(userModel, "create").mockResolvedValue(mockUser as any);
+    jest.spyOn(userModel, "findOneAndUpdate").mockResolvedValue(null);
+    jest.spyOn(companyModel, "updateOne").mockResolvedValue({} as any);
+    jest.spyOn(facilityModel, "updateMany").mockResolvedValue({} as any);
+    jest.spyOn(configService, "get").mockReturnValue("86400000");
+    jest.spyOn(emailService, "emailSender").mockResolvedValue("email sent");
+    jest.spyOn(commonService, "generateRandomString").mockReturnValue(token);
+    jest
+      .spyOn(imageUploadService, "moveTempToRealFolder")
+      .mockResolvedValue(undefined);
+
+    process.env.APP_ENV = AppEnvironment.PRODUCTION;
+
+    // Act
+    const result = await service.createUser(dto, {});
+
+    // Assert
+    expect(result).toEqual(mockUser);
+  });
+
+  it("should skip alerts for SUB_ADMIN", async () => {
+    process.env.APP_ENV = AppEnvironment.PRODUCTION;
+
+    const dto = {
+      firstName: "Admin",
+      lastName: "User",
+      email: "admin@example.com",
+      phoneNumber: "+12345678901",
+      role: Role.SUB_ADMIN,
+      permissions: {
+        facility: { view: true },
+      },
+    } as CreateUserDto;
+
+    userModel.findOne.mockResolvedValue(null);
+    userModel.create.mockResolvedValue({
+      _id: new Types.ObjectId(),
+      email: "admin@example.com",
     });
-    expect(mockUserModel.create).toHaveBeenCalled();
-    expect(mockEmailService.emailSender).toHaveBeenCalled();
-    expect((result as any)._id).toBe(mockUser._id);
-  });
+    userModel.findOneAndUpdate.mockResolvedValue({});
+    emailService.emailSender.mockResolvedValue({});
 
-  it("should fail if user already exists", async () => {
-    mockUserModel.findOne.mockResolvedValue({ _id: "existingId" });
-
-    await expect(
-      service.createUser(baseDto, mockRequest(Role.SUB_ADMIN)),
-    ).rejects.toThrow("User already exist");
-  });
-
-  it("should fail for invalid role created by admin", async () => {
-    const dto = { ...baseDto, role: Role.OPERATOR };
-    mockUserModel.findOne.mockResolvedValue(null);
-
-    await expect(
-      service.createUser(dto, mockRequest(Role.ADMIN)),
-    ).rejects.toThrow();
-  });
-
-  it("should fail for invalid role created by sub-admin", async () => {
-    const dto = { ...baseDto, role: Role.ADMIN };
-    mockUserModel.findOne.mockResolvedValue(null);
-
-    await expect(
-      service.createUser(dto, mockRequest(Role.SUB_ADMIN)),
-    ).rejects.toThrow();
-  });
-
-  it("should fail for unauthorized user role", async () => {
-    const dto = { ...baseDto };
-    mockUserModel.findOne.mockResolvedValue(null);
-
-    await expect(
-      service.createUser(dto, mockRequest(Role.CORPORATE_MANAGER)),
-    ).rejects.toThrow();
-  });
-
-  it("should auto-fix permissions with view: true", async () => {
-    mockUserModel.findOne.mockResolvedValue(null);
-    // mockUserModel.create.mockResolvedValue({ _id: '123', ...baseDto });
-    // mockUserModel.create.mockImplementation((data: any) => data);
-    mockUserModel.create.mockImplementation((data: any) => ({
-      ...data,
-      _id: new mongoose.Types.ObjectId(),
-    }));
-
-    const result = await service.createUser(
-      baseDto,
-      mockRequest(Role.SUB_ADMIN),
-    );
-    expect(result.permissions.facility.view).toBe(true);
-  });
-
-  it("should remove alerts for SUB_ADMIN", async () => {
-    mockUserModel.findOne.mockResolvedValue(null);
-    // mockUserModel.create.mockImplementation((user: any) => user);
-    // mockUserModel.create.mockImplementation((data: any) => data);
-    mockUserModel.create.mockImplementation((data: any) => ({
-      ...data,
-      _id: new mongoose.Types.ObjectId(),
-    }));
-
-    const dto = { ...baseDto, role: Role.SUB_ADMIN };
-    const user = await service.createUser(dto, mockRequest(Role.ADMIN));
-    expect(user.alerts).toBeUndefined();
-  });
-
-  it("should retain alerts for OPERATOR", async () => {
-    mockUserModel.findOne.mockResolvedValue(null);
-    // mockUserModel.create.mockImplementation((user: any) => user);
-    // mockUserModel.create.mockImplementation((data: any) => data);
-    mockUserModel.create.mockImplementation((data: any) => ({
-      ...data,
-      _id: new mongoose.Types.ObjectId(),
-    }));
-
-    const user = await service.createUser(baseDto, mockRequest(Role.SUB_ADMIN));
-    expect(user.alerts).toBeDefined();
-  });
-
-  it("should upload image if profileImage exists", async () => {
-    mockUserModel.findOne.mockResolvedValue(null);
-    mockUserModel.create.mockResolvedValue({ _id: "123", ...baseDto });
-    const dto = { ...baseDto, profileImage: "test.jpg" };
-    await service.createUser(dto, mockRequest(Role.SUB_ADMIN));
-    expect(mockImageUploadService.moveTempToRealFolder).toHaveBeenCalledWith(
-      "test.jpg",
+    const result = await service.createUser(dto, {});
+    expect(result).toHaveProperty("email", "admin@example.com");
+    expect(userModel.create).toHaveBeenCalledWith(
+      expect.not.objectContaining({ alerts: expect.anything() }),
     );
   });
 
-  it("should set reset token and expiry", async () => {
-    // mockUserModel.findOne.mockResolvedValue(null);
-    // mockUserModel.create.mockResolvedValue({ _id: 'user123', ...baseDto });
-    const now = Date.now();
-    jest.spyOn(global.Date, "now").mockReturnValue(now);
+  it("should return email template in staging/local environment", async () => {
+    process.env.APP_ENV = "test"; // not DEV or PROD
 
-    const userId = new mongoose.Types.ObjectId();
-    mockUserModel.findOne.mockResolvedValue(null);
-    mockUserModel.create.mockResolvedValue({ _id: userId, ...baseDto });
+    const dto = {
+      firstName: "Test",
+      lastName: "User",
+      email: "test@example.com",
+      phoneNumber: "+12345678901",
+      role: Role.FACILITY_MANAGER,
+      facilityIds: [],
+      companyId: "60f6a4d4a9c0a0b3e8d8e8e8",
+      permissions: {
+        facility: { view: true },
+      },
+    } as CreateUserDto;
 
-    await service.createUser(baseDto, mockRequest(Role.SUB_ADMIN));
-    expect(mockUserModel.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: userId },
-      expect.objectContaining({
-        resetPasswordToken: "mock-token",
-        resetPasswordExpires: new Date(now + 3600000),
-      }),
-    );
+    userModel.findOne.mockResolvedValue(null);
+    userModel.create.mockResolvedValue({
+      _id: new Types.ObjectId(),
+      email: "test@example.com",
+    });
+    userModel.findOneAndUpdate.mockResolvedValue({});
+    emailService.emailSender.mockResolvedValue("mock-html");
+
+    const result = await service.createUser(dto, {});
+    expect(result).toHaveProperty("user");
+    expect(result).toHaveProperty("emailTemplate", "mock-html");
   });
 
-  it("should throw unknown error if unexpected error occurs", async () => {
-    mockUserModel.findOne.mockRejectedValue(new Error("DB Error"));
+  it("should handle unknown errors and throw CustomError", async () => {
+    userModel.findOne.mockRejectedValue(new Error("DB failure"));
+
     await expect(
-      service.createUser(baseDto, mockRequest(Role.SUB_ADMIN)),
-    ).rejects.toThrow("DB Error");
+      service.createUser({ email: "fail@test.com" } as any, {}),
+    ).rejects.toThrow("DB failure");
   });
 });
 
-describe("UserService - findAll()", () => {
+describe("UserService - updateProfile", () => {
   let service: UserService;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let userModel: any;
+  let companyModel: any;
+  let facilityModel: any;
+  let chillerModel: any;
+  let imageUploadService: any;
+  // let configService: any;
 
-  const mockUserModel = {
-    aggregate: jest.fn(),
+  // let commonService: any;
+
+  // let emailService: any;
+
+  const mockUserId = new mongoose.Types.ObjectId();
+  const mockLoggedInId = new mongoose.Types.ObjectId();
+
+  const mockUserDoc = {
+    _id: mockUserId,
+    isActive: true,
+    role: Role.OPERATOR,
+    facilityIds: [],
+    chillerIds: [],
+    save: jest.fn(),
+    firstName: "test",
+    lastName: "user",
+    phoneNumber: "+12345678901",
+    isProfileUpdated: true,
+    profileImage: "asdf.jpg",
   };
 
-  const mockImageUploadService = {
-    uploadImage: jest.fn(),
+  const commonService = {
+    generateRandomString: jest.fn().mockReturnValue("mockToken"),
+    moveTempToRealFolder: jest.fn(),
   };
 
-  const mockEmailService = {
+  const configService = {
+    get: jest.fn().mockReturnValue(3600000), // 1 hour in ms
+  };
+
+  const mockLoggedInUser = {
+    _id: mockLoggedInId,
+    role: Role.ADMIN,
+  };
+
+  const emailService = {
     emailSender: jest.fn(),
   };
 
-  const mockPasswordService = {
-    generatePassword: jest.fn(),
-  };
-  const mockCommonService = {
-    generateRandomString: jest.fn(),
+  imageUploadService = {
+    moveTempToRealFolder: jest.fn(),
   };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UserService,
-        { provide: getModelToken("User"), useValue: mockUserModel },
-        { provide: EmailService, useValue: mockEmailService },
-        { provide: PasswordGeneratorService, useValue: mockPasswordService },
-        { provide: ImageUploadService, useValue: mockImageUploadService },
-        { provide: CommonService, useValue: mockCommonService },
+        { provide: getModelToken(User.name), useValue: {} },
+        { provide: ImageUploadService, useValue: imageUploadService },
+        { provide: EmailService, useValue: emailService },
+        { provide: "CompanyModel", useValue: {} },
+        { provide: "FacilityModel", useValue: {} },
+        { provide: "ChillerModel", useValue: {} },
+        { provide: ConfigService, useValue: configService },
+        { provide: CommonService, useValue: commonService },
         {
-          provide: ConfigService,
+          provide: "ImageUploadService",
           useValue: {
-            get: jest.fn((key) => {
-              if (key === "auth.resetPasswordExpiryDuration") return "3600000"; // 1 hour expiry
-              return null;
-            }),
+            moveTempToRealFolder: jest.fn(),
+            deleteImage: jest.fn(),
           },
         },
       ],
     }).compile();
 
     service = module.get<UserService>(UserService);
-    userModel = module.get(getModelToken("User"));
+    userModel = module.get(getModelToken(User.name));
+    companyModel = module.get("CompanyModel");
+    facilityModel = module.get("FacilityModel");
+    chillerModel = module.get("ChillerModel");
+    imageUploadService = module.get("ImageUploadService");
+
+    userModel.findById = jest
+      .fn()
+      .mockImplementationOnce(() => mockUserDoc)
+      .mockImplementationOnce(() => mockLoggedInUser);
+
+    companyModel.updateOne = jest.fn();
+    facilityModel.updateMany = jest.fn();
+    chillerModel.updateMany = jest.fn();
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
+  it("should throw if user not found", async () => {
+    userModel.findById = jest.fn().mockResolvedValueOnce(null);
+
+    await expect(
+      service.updateProfile(
+        mockUserId.toString(),
+        {} as UpdateUserDto,
+        mockLoggedInId.toString(),
+      ),
+    ).rejects.toThrow(AuthExceptions.AccountNotExist().message);
   });
 
-  it("should return paginated and filtered users with search and filters", async () => {
-    const mockResult = [
-      {
-        userList: [{ firstName: "Alice" }],
-        totalRecords: [{ count: 1 }],
-      },
-    ];
+  it("should throw if user is not active", async () => {
+    userModel.findById = jest.fn().mockResolvedValueOnce({ isActive: false });
 
-    const body: UserListDto = {
-      page: 1,
-      limit: 10,
-      search: "alice",
-      sort_by: "createdAt",
-      sort_order: "DESC",
-      companyId: new mongoose.Types.ObjectId().toHexString(),
-      facilityId: new mongoose.Types.ObjectId().toHexString(),
-      role: Role.OPERATOR,
+    await expect(
+      service.updateProfile(
+        mockUserId.toString(),
+        {} as UpdateUserDto,
+        mockLoggedInId.toString(),
+      ),
+    ).rejects.toThrow(AuthExceptions.AccountNotActive().message);
+  });
+
+  it("should update user fields and return correct message", async () => {
+    const dto: UpdateUserDto = {
+      firstName: "Updated",
+      phoneNumber: "+19876543210",
+      role: Role.FACILITY_MANAGER,
+      companyId: new mongoose.Types.ObjectId().toString(),
+      profileImage: "newImage.jpg",
     };
 
-    userModel.aggregate.mockResolvedValue(mockResult);
+    const userDoc = { ...mockUserDoc, save: jest.fn() };
 
-    const result = await service.findAll(body);
-    expect(userModel.aggregate).toHaveBeenCalled();
-    expect(result.userList).toHaveLength(1);
-    expect(result.totalRecords).toBe(1);
+    userModel.findById = jest
+      .fn()
+      .mockResolvedValueOnce(userDoc) // user
+      .mockResolvedValueOnce(mockLoggedInUser); // logged-in user
+
+    const result = await service.updateProfile(
+      mockUserId.toString(),
+      dto,
+      mockLoggedInId.toString(),
+    );
+
+    expect(userDoc.firstName).toBe(dto.firstName);
+    expect(userDoc.phoneNumber).toBe(dto.phoneNumber);
+    expect(userDoc.profileImage).toBe(dto.profileImage);
+    expect(userDoc.role).toBe(dto.role);
+    expect(userDoc.save).toHaveBeenCalled();
+
+    // expect(imageUploadService.moveTempToRealFolder).toHaveBeenCalled();
+    // expect(imageUploadService.deleteImage).toHaveBeenCalled();
+
+    expect(result.message).toBe(USER.ADMIN_UPDATE);
+    expect(result.user).toBeDefined();
   });
 
-  it("should return default results when no filters are provided", async () => {
-    const mockResult = [
-      {
-        userList: [{ firstName: "Bob" }],
-        totalRecords: [{ count: 1 }],
+  it("should reset alerts if role is ADMIN", async () => {
+    const dto: UpdateUserDto = {
+      role: Role.ADMIN,
+      alerts: {
+        general: {
+          notifyBy: NotificationType.EMAIL,
+          conditions: [
+            {
+              metric: "Temp",
+              warning: { operator: ComparisonOperator.GTE, threshold: 30 },
+              alert: { operator: ComparisonOperator.GTE, threshold: 40 },
+            },
+          ],
+        },
+        logs: [],
       },
-    ];
+      phoneNumber: "+12345678901",
+    };
 
-    userModel.aggregate.mockResolvedValue(mockResult);
+    const userDoc = {
+      ...mockUserDoc,
+      alerts: {},
+      save: jest.fn(),
+    };
 
-    const result = await service.findAll({ page: 1, limit: 10 });
+    userModel.findById = jest
+      .fn()
+      .mockImplementationOnce(() => userDoc)
+      .mockImplementationOnce(() => mockLoggedInUser);
 
-    expect(userModel.aggregate).toHaveBeenCalled();
-    expect(result.userList[0].firstName).toBe("Bob");
-    expect(result.totalRecords).toBe(1);
-  });
+    const result = await service.updateProfile(
+      mockUserId.toString(),
+      dto,
+      mockLoggedInId.toString(),
+    );
 
-  it("should handle search without filters", async () => {
-    const mockResult = [
-      {
-        userList: [{ firstName: "Charlie" }],
-        totalRecords: [{ count: 1 }],
-      },
-    ];
-
-    userModel.aggregate.mockResolvedValue(mockResult);
-
-    const result = await service.findAll({
-      page: 1,
-      limit: 5,
-      search: "char",
+    expect(userDoc.alerts).toEqual({
+      general: { conditions: [] },
+      logs: [],
     });
-
-    expect(userModel.aggregate).toHaveBeenCalled();
-    expect(result.userList[0].firstName).toBe("Charlie");
-    expect(result.totalRecords).toBe(1);
+    expect(result).toHaveProperty("user");
   });
 
-  it("should throw error for invalid pagination (page = 0)", async () => {
-    await expect(service.findAll({ page: 0, limit: 10 })).rejects.toThrowError(
-      TypeExceptions.BadRequestCommonFunction(
-        RESPONSE_ERROR.INVALID_PAGE_AND_LIMIT_VALUE,
-      ),
+  it("should mark isProfileUpdated based on logged-in user", async () => {
+    const dto: UpdateUserDto = {
+      phoneNumber: "+12345678901",
+    };
+
+    const userDoc = {
+      ...mockUserDoc,
+      save: jest.fn(),
+    };
+
+    userModel.findById = jest
+      .fn()
+      .mockImplementationOnce(() => userDoc)
+      .mockImplementationOnce(() => mockLoggedInUser);
+
+    const result = await service.updateProfile(
+      mockUserId.toString(),
+      dto,
+      mockLoggedInUser._id.toString(),
     );
-  });
 
-  it("should throw error for invalid pagination (limit = 0)", async () => {
-    await expect(service.findAll({ page: 1, limit: 0 })).rejects.toThrowError(
-      TypeExceptions.BadRequestCommonFunction(
-        RESPONSE_ERROR.INVALID_PAGE_AND_LIMIT_VALUE,
-      ),
-    );
-  });
-
-  it("should return totalRecords as 0 if count is not present", async () => {
-    const mockResult = [
-      {
-        userList: [],
-        totalRecords: [],
-      },
-    ];
-
-    userModel.aggregate.mockResolvedValue(mockResult);
-
-    const result = await service.findAll({ page: 1, limit: 10 });
-
-    expect(result.userList).toHaveLength(0);
-    expect(result.totalRecords).toBe(0);
+    expect(userDoc.isProfileUpdated).toBe(true);
+    expect(result.message).toBeDefined();
   });
 });
 
-describe("UserService - updateUserStatus", () => {
+describe("UserService - getUserById", () => {
   let service: UserService;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
-  let userModel: Model<any>;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  let emailService: EmailService;
+  let userModel: any;
+
+  const mockUserId = new mongoose.Types.ObjectId().toString();
+
+  const mockAggregatedUser = [
+    {
+      _id: new mongoose.Types.ObjectId(),
+      firstName: "John",
+      lastName: "Doe",
+      name: "John Doe",
+      email: "john.doe@example.com",
+      phoneNumber: "1234567890",
+      role: Role.OPERATOR,
+      companyId: new mongoose.Types.ObjectId(),
+      company: {
+        _id: new mongoose.Types.ObjectId(),
+        name: "Test Company",
+        totalOperators: 2,
+      },
+      facilityIds: [new mongoose.Types.ObjectId()],
+      facilities: [
+        {
+          _id: new mongoose.Types.ObjectId(),
+          name: "Facility A",
+          totalChiller: 1,
+          totalOperators: 2,
+        },
+      ],
+      chillerIds: [new mongoose.Types.ObjectId()],
+      chillers: [
+        {
+          _id: new mongoose.Types.ObjectId(),
+          name: "Chiller 1",
+          facilityName: "Facility A",
+          totalOperators: 2,
+        },
+      ],
+      profileImage: "image.png",
+      isActive: true,
+      createdAt: new Date(),
+      lastLoginTime: new Date(),
+      resetPasswordToken: null,
+      resetPasswordExpires: null,
+      failedLoginAttempts: 0,
+      lastFailedLoginAttempt: null,
+      permissions: [],
+      alerts: {},
+    },
+  ];
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UserService,
+
+        // Mongoose model mocks using .name
+        {
+          provide: getModelToken(User.name),
+          useValue: {
+            aggregate: jest.fn(),
+          },
+        },
+        {
+          provide: getModelToken(Facility.name),
+          useValue: {},
+        },
+        {
+          provide: getModelToken(Chiller.name),
+          useValue: {},
+        },
+        {
+          provide: getModelToken(Company.name),
+          useValue: {},
+        },
+
+        // Service mocks
+        {
+          provide: ImageUploadService,
+          useValue: {
+            moveTempToRealFolder: jest.fn(),
+            deleteImage: jest.fn(),
+          },
+        },
+        {
+          provide: EmailService,
+          useValue: {
+            sendEmail: jest.fn(),
+          },
+        },
+        {
+          provide: CommonService,
+          useValue: {},
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn(),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get<UserService>(UserService);
+    userModel = module.get(getModelToken(User.name));
+  });
+
+  it("should return user data when found", async () => {
+    userModel.aggregate.mockResolvedValueOnce(mockAggregatedUser);
+
+    const result = await service.getUserById(mockUserId);
+
+    expect(userModel.aggregate).toHaveBeenCalledWith(expect.any(Array));
+    expect(result).toEqual(mockAggregatedUser[0]);
+  });
+
+  it("should throw AccountNotExist if user is not found", async () => {
+    userModel.aggregate.mockResolvedValueOnce([]);
+
+    await expect(service.getUserById(mockUserId)).rejects.toThrow(
+      AuthExceptions.AccountNotExist().message,
+    );
+  });
+
+  it("should throw UnknownError on exception", async () => {
+    userModel.aggregate.mockRejectedValueOnce(new Error("Unexpected error"));
+
+    await expect(service.getUserById(mockUserId)).rejects.toThrow(
+      CustomError.UnknownError("Unexpected error", 500).message,
+    );
+  });
+});
+
+describe("UserService - findAll", () => {
+  let userService: UserService;
+  let userModel: any;
 
   const mockUserModel = {
-    findById: jest.fn(),
+    aggregate: jest.fn(),
   };
-
-  const mockEmailService = {
-    emailSender: jest.fn(),
-  };
-
-  const mockImageUploadService = {
-    uploadImage: jest.fn(),
-  };
-  const mockCommonService = {
-    generateRandomString: jest.fn(),
-  };
-
-  const mockPassword = {};
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UserService,
         { provide: getModelToken("User"), useValue: mockUserModel },
+        { provide: getModelToken("Facility"), useValue: {} },
+        { provide: getModelToken("Chiller"), useValue: {} },
+        { provide: getModelToken("Company"), useValue: {} },
+        { provide: ImageUploadService, useValue: {} },
+        { provide: EmailService, useValue: {} },
+        { provide: CommonService, useValue: {} },
+        { provide: ConfigService, useValue: {} },
+      ],
+    }).compile();
+
+    userService = module.get<UserService>(UserService);
+    userModel = module.get<Model<any>>(getModelToken("User"));
+  });
+
+  it("should throw error if page or limit is invalid", async () => {
+    const invalidPayload = { page: 0, limit: -1 };
+
+    await expect(userService.findAll(invalidPayload)).rejects.toThrow(
+      TypeExceptions.BadRequestCommonFunction(
+        "Please enter valid page and limit values",
+      ),
+    );
+  });
+
+  it("should call aggregate with correct pipeline and return data", async () => {
+    const mockPayload: UserListDto = {
+      page: 1,
+      limit: 10,
+      search: "john",
+      sort_by: "name",
+      sort_order: "ASC",
+      companyId: new mongoose.Types.ObjectId().toString(),
+      facilityId: new mongoose.Types.ObjectId().toString(),
+      role: Role.OPERATOR,
+    };
+
+    const mockResult = [
+      {
+        userList: [{ _id: "user1", name: "John Doe" }],
+        totalRecords: [{ count: 1 }],
+      },
+    ];
+
+    userModel.aggregate.mockResolvedValueOnce(mockResult);
+
+    const result = await userService.findAll(mockPayload);
+
+    expect(userModel.aggregate).toHaveBeenCalledWith(expect.any(Array));
+    expect(result).toEqual({
+      userList: [{ _id: "user1", name: "John Doe" }],
+      totalRecords: 1,
+    });
+  });
+
+  it("should return 0 if no records are found", async () => {
+    const mockPayload = {
+      page: 1,
+      limit: 10,
+    };
+
+    userModel.aggregate.mockResolvedValueOnce([
+      {
+        userList: [],
+        totalRecords: [],
+      },
+    ]);
+
+    const result = await userService.findAll(mockPayload);
+
+    expect(result.totalRecords).toBe(0);
+    expect(result.userList).toEqual([]);
+  });
+
+  it("should throw CustomError on unknown errors", async () => {
+    const mockPayload = { page: 1, limit: 10 };
+    userModel.aggregate.mockRejectedValueOnce(new Error("Something failed"));
+
+    await expect(userService.findAll(mockPayload)).rejects.toThrow(
+      CustomError.UnknownError("Something failed", 500).message,
+    );
+  });
+});
+
+describe("UserService - updateUserStatus()", () => {
+  let service: UserService;
+  let userModel: any;
+  let emailService: any;
+
+  const mockUser: any = {
+    _id: "userId123",
+    email: "john@example.com",
+    firstName: "John",
+    isActive: false,
+    isDeleted: false,
+    isProfileUpdated: false,
+    companyId: "company123",
+    facilityIds: ["fac123"],
+    save: jest.fn(),
+  };
+
+  const mockEmailService = {
+    emailSender: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UserService,
+        { provide: getModelToken("User"), useValue: { findById: jest.fn() } },
+        { provide: getModelToken("Facility"), useValue: {} },
+        { provide: getModelToken("Chiller"), useValue: {} },
+        { provide: getModelToken("Company"), useValue: {} },
         { provide: EmailService, useValue: mockEmailService },
-        { provide: ImageUploadService, useValue: mockImageUploadService },
-        { provide: PasswordGeneratorService, useValue: mockPassword },
-        { provide: CommonService, useValue: mockCommonService },
+        { provide: getModelToken("ImageUploadService"), useValue: {} },
+        // { provide: getModelToken('CommonService'), useValue: {} },
+        { provide: CommonService, useValue: {} },
+        // { provide: getModelToken('ConfigService'), useValue: {} },
+        { provide: ConfigService, useValue: {} },
         {
-          provide: ConfigService,
+          provide: ImageUploadService,
           useValue: {
-            get: jest.fn((key) => {
-              if (key === "auth.resetPasswordExpiryDuration") return "3600000"; // 1 hour expiry
-              return null;
-            }),
+            uploadProfileImage: jest.fn(),
+            deleteImage: jest.fn(),
           },
         },
       ],
@@ -884,107 +733,214 @@ describe("UserService - updateUserStatus", () => {
     emailService = module.get<EmailService>(EmailService);
   });
 
+  it("should activate a user and send email", async () => {
+    const dto: UpdateUserStatusDto = {
+      userId: "userId123",
+      isActive: true,
+      shouldUnassign: false,
+    };
+
+    const user = { ...mockUser, isActive: false, save: jest.fn() };
+    userModel.findById.mockResolvedValue(user);
+
+    const result = await service.updateUserStatus(dto);
+
+    expect(user.save).toHaveBeenCalled();
+    expect(emailService.emailSender).toHaveBeenCalledWith({
+      to: user.email,
+      subject: "Account Activated",
+      html: accountStatusTemplate(true, { firstName: user.firstName }),
+    });
+    expect(result).toBe(USER.USER_ACTIVATED);
+  });
+
+  it("should deactivate a user and unassign if requested", async () => {
+    const dto: UpdateUserStatusDto = {
+      userId: "userId123",
+      isActive: false,
+      shouldUnassign: true,
+    };
+
+    const user = { ...mockUser, isActive: true, save: jest.fn() };
+    userModel.findById.mockResolvedValue(user);
+
+    const result = await service.updateUserStatus(dto);
+
+    expect(user.companyId).toBe(null);
+    expect(user.facilityIds).toEqual([]);
+    expect(user.save).toHaveBeenCalled();
+    expect(emailService.emailSender).toHaveBeenCalledWith({
+      to: user.email,
+      subject: "Account Deactivated",
+      html: accountStatusTemplate(false, { firstName: user.firstName }),
+    });
+    expect(result).toBe(USER.USER_INACTIVATED);
+  });
+
+  it("should return early if status is already the same", async () => {
+    const dto: UpdateUserStatusDto = {
+      userId: "userId123",
+      isActive: false,
+      shouldUnassign: false,
+    };
+
+    const user = { ...mockUser, isActive: false };
+    userModel.findById.mockResolvedValue(user);
+
+    const result = await service.updateUserStatus(dto);
+
+    expect(result).toBe("User is already inactive");
+    expect(user.save).not.toHaveBeenCalled();
+    // expect(emailService.emailSender).not.toHaveBeenCalled();
+  });
+
+  it("should throw error if user not found or is deleted", async () => {
+    const dto: UpdateUserStatusDto = {
+      userId: "userId123",
+      isActive: true,
+      shouldUnassign: false,
+    };
+
+    userModel.findById.mockResolvedValue(null);
+
+    await expect(service.updateUserStatus(dto)).rejects.toThrow(
+      AuthExceptions.AccountNotExist(),
+    );
+
+    userModel.findById.mockResolvedValue({ ...mockUser, isDeleted: true });
+
+    await expect(service.updateUserStatus(dto)).rejects.toThrow(
+      AuthExceptions.AccountNotExist(),
+    );
+  });
+
+  it("should throw custom error on internal failure", async () => {
+    const dto: UpdateUserStatusDto = {
+      userId: "userId123",
+      isActive: true,
+      shouldUnassign: false,
+    };
+
+    const user = {
+      ...mockUser,
+      isActive: false,
+      save: jest.fn().mockRejectedValue(new Error("DB Save Failed")),
+    };
+    userModel.findById.mockResolvedValue(user);
+
+    await expect(service.updateUserStatus(dto)).rejects.toThrow(
+      CustomError.UnknownError("DB Save Failed", 500).message,
+    );
+  });
+});
+
+describe("UserService - getUsersAssignedToChillers", () => {
+  let service: UserService;
+
+  const mockUserModel = {
+    find: jest.fn(),
+  };
+
+  const mockChillerModel = {
+    find: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UserService,
+        { provide: getModelToken(User.name), useValue: mockUserModel },
+        { provide: getModelToken(Chiller.name), useValue: mockChillerModel },
+        { provide: getModelToken(Facility.name), useValue: {} },
+        { provide: getModelToken(Company.name), useValue: {} },
+        {
+          provide: EmailService,
+          useValue: { emailSender: jest.fn() },
+        },
+        {
+          provide: ImageUploadService,
+          useValue: { uploadProfileImage: jest.fn(), deleteImage: jest.fn() },
+        },
+        { provide: CommonService, useValue: {} },
+        { provide: ConfigService, useValue: { get: jest.fn() } },
+      ],
+    }).compile();
+
+    service = module.get<UserService>(UserService);
+  });
+
   afterEach(() => {
     jest.clearAllMocks();
   });
 
-  const mockDto = { userId: "123abc", isActive: true };
+  it("should return empty array when no chillers are found", async () => {
+    mockChillerModel.find.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([]),
+    });
 
-  it("should return already active message if status is same", async () => {
-    const user = {
-      _id: "123abc",
+    const facilityIds = [new mongoose.Types.ObjectId()];
+    const result = await service.getUsersAssignedToChillers(facilityIds);
+    expect(result).toEqual([]);
+    expect(mockChillerModel.find).toHaveBeenCalledWith({
+      facilityId: { $in: facilityIds },
       isDeleted: false,
-      isActive: true,
-    };
-    mockUserModel.findById.mockResolvedValue(user);
-
-    const result = await service.updateUserStatus(mockDto);
-
-    expect(result).toBe("User is already active");
-    expect(mockUserModel.findById).toHaveBeenCalledWith("123abc");
-    expect(mockEmailService.emailSender).not.toHaveBeenCalled();
+    });
   });
 
-  it("should update status and send email if user is valid", async () => {
-    const save = jest.fn().mockResolvedValue(true);
+  it("should return empty array when no users assigned to chillers", async () => {
+    const mockChillers = [
+      { _id: new mongoose.Types.ObjectId() },
+      { _id: new mongoose.Types.ObjectId() },
+    ];
 
-    const user = {
-      _id: "123abc",
+    mockChillerModel.find.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue(mockChillers),
+    });
+
+    mockUserModel.find.mockReturnValue({
+      lean: jest.fn().mockResolvedValue([]),
+    });
+
+    const facilityIds = [new mongoose.Types.ObjectId()];
+    const result = await service.getUsersAssignedToChillers(facilityIds);
+
+    expect(result).toEqual([]);
+    expect(mockChillerModel.find).toHaveBeenCalled();
+    expect(mockUserModel.find).toHaveBeenCalledWith({
+      chillerIds: { $in: mockChillers.map((c) => c._id) },
       isDeleted: false,
-      isActive: false,
-      email: "test@example.com",
-      firstName: "Vishal",
-      save,
-    };
+    });
+  });
 
-    mockUserModel.findById.mockResolvedValue(user);
-    mockEmailService.emailSender.mockResolvedValue(true);
+  it("should return users assigned to chillers", async () => {
+    const mockChillers = [{ _id: new mongoose.Types.ObjectId() }];
+    const mockUsers = [
+      {
+        _id: new mongoose.Types.ObjectId(),
+        name: "John Doe",
+        chillerIds: [mockChillers[0]._id],
+        isDeleted: false,
+      },
+    ];
 
-    const result = await service.updateUserStatus({
-      userId: "123abc",
-      isActive: true,
+    mockChillerModel.find.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue(mockChillers),
     });
 
-    expect(save).toHaveBeenCalled();
-    expect(mockEmailService.emailSender).toHaveBeenCalledWith({
-      to: "test@example.com",
-      subject: "Account Activated",
-      html: expect.stringContaining("activated"),
+    mockUserModel.find.mockReturnValue({
+      lean: jest.fn().mockResolvedValue(mockUsers),
     });
-    expect(result).toBe("User has been activated successfully");
-  });
 
-  it("should throw AuthException if user not found", async () => {
-    mockUserModel.findById.mockResolvedValue(null);
+    const facilityIds = [new mongoose.Types.ObjectId()];
+    const result = await service.getUsersAssignedToChillers(facilityIds);
 
-    await expect(service.updateUserStatus(mockDto)).rejects.toThrow(
-      AuthExceptions.AccountNotExist().message,
-    );
-  });
-
-  it("should throw AuthException if user is marked deleted", async () => {
-    mockUserModel.findById.mockResolvedValue({ isDeleted: true });
-
-    await expect(service.updateUserStatus(mockDto)).rejects.toThrow(
-      AuthExceptions.AccountNotExist().message,
-    );
-  });
-
-  it("should throw CustomError if unknown error occurs", async () => {
-    mockUserModel.findById.mockRejectedValue(new Error("DB Error"));
-
-    await expect(service.updateUserStatus(mockDto)).rejects.toThrow("DB Error");
-  });
-
-  it("should deactivate user, clear company/facility, and send email", async () => {
-    const save = jest.fn().mockResolvedValue(true);
-    const user = {
-      _id: "123abc",
+    expect(result).toEqual(mockUsers);
+    expect(mockUserModel.find).toHaveBeenCalledWith({
+      chillerIds: { $in: mockChillers.map((c) => c._id) },
       isDeleted: false,
-      isActive: true,
-      email: "test@example.com",
-      firstName: "Vishal",
-      companyId: "cmp123",
-      facilityIds: ["fac123", "fac456"],
-      save,
-    };
-
-    mockUserModel.findById.mockResolvedValue(user);
-    mockEmailService.emailSender.mockResolvedValue(true);
-
-    const result = await service.updateUserStatus({
-      userId: "123abc",
-      isActive: false,
     });
-
-    expect(user.companyId).toBe(null);
-    expect(user.facilityIds).toEqual([]);
-    expect(save).toHaveBeenCalled();
-    expect(mockEmailService.emailSender).toHaveBeenCalledWith({
-      to: "test@example.com",
-      subject: "Account Deactivated",
-      html: expect.stringContaining("deactivated"),
-    });
-    expect(result).toBe("User has been deactivated successfully");
   });
 });

@@ -23,6 +23,7 @@ export interface UserLoginInterface {
   deviceId: string;
   deviceType: string;
   permissions?: Record<string, ModulePermission>;
+  companyId?: string;
 }
 
 export interface CreateDeviceInterface {
@@ -46,6 +47,7 @@ export interface CreateInitialUserInterface {
   password?: string;
   role: Role;
   phoneNumber: string;
+  isActive: boolean;
 }
 
 export interface CreateProfile {

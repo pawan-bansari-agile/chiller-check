@@ -6,4 +6,10 @@ export const TABLE_NAMES = {
   COMPANY: "company",
   FACILITY: "facility",
   CHILLER: "chiller",
+  ProblemAndSolution: "problemAndSolutions",
+  CHILLER_TIMELINE: "timeline",
+  LOGS: "logs",
+  MAINTENANCE_LOGS: "maintenanceLogs",
+  BAD_LOGS: "badLogs",
+  SCHEDULE_JOBS: "ScheduledJob",
 };

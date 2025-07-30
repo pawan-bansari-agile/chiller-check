@@ -65,6 +65,15 @@ export class Company {
 
   @Prop({ required: true, default: false })
   isDeleted: boolean;
+
+  @Prop({ required: false })
+  freeTrialStartDate: Date;
+
+  @Prop({ required: false })
+  freeTrialEndDate: Date;
+
+  @Prop({ required: false, default: false })
+  trialReminderSent: boolean;
 }
 
 export const CompanySchema = SchemaFactory.createForClass(Company);

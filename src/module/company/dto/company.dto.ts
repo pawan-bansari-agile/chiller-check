@@ -16,6 +16,28 @@ import {
   CreateFacilityWithCompanyDTO,
 } from "src/module/facility/dto/facility.dto";
 
+export class UnassignedCompanyListDto {
+  @ApiProperty()
+  @IsNotEmpty()
+  @IsNumber()
+  page: number;
+
+  @ApiProperty()
+  @IsNotEmpty()
+  @IsNumber()
+  limit: number;
+
+  @ApiProperty({ required: false, enum: ["ASC", "DESC"] })
+  @IsOptional()
+  // @IsIn(["ASC", "DESC"])
+  sort_order?: "ASC" | "DESC";
+
+  @ApiProperty()
+  @IsOptional()
+  @IsString()
+  sort_by?: string;
+}
+
 export class CompanyListDto {
   @ApiProperty()
   @IsNotEmpty()
@@ -55,7 +77,7 @@ export class CreateCompanyDto {
   address1: string;
 
   @ApiProperty({ description: "Address line 2 of the company" })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   address2: string;
 
@@ -81,7 +103,7 @@ export class CreateCompanyDto {
   zipcode: string;
 
   @ApiProperty({ description: "Company's website" })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   @IsUrl({}, { message: "Website must be a valid URL" })
   website: string;
@@ -105,6 +127,7 @@ export class EditCompanyDto {
   address1: string;
 
   @ApiProperty({ description: "Address line 2 of the company" })
+  @IsOptional()
   address2: string;
 
   @ApiProperty({ description: "City where the company is located" })
