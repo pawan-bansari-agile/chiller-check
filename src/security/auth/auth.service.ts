@@ -382,17 +382,23 @@ export class AuthService {
         role: Role.ADMIN,
       },
       {
-        configKey: "database.testUser",
+        configKey: "database.larry",
         logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
         logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
         role: Role.ADMIN, // change this role accordingly
       },
-      {
-        configKey: "database.sauravUser",
-        logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
-        logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
-        role: Role.ADMIN, // change this role accordingly
-      },
+      // {
+      //   configKey: "database.testUser",
+      //   logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
+      //   logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
+      //   role: Role.ADMIN, // change this role accordingly
+      // },
+      // {
+      //   configKey: "database.sauravUser",
+      //   logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
+      //   logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
+      //   role: Role.ADMIN, // change this role accordingly
+      // },
     ];
     // const user1 = await this.userModel.findOne({
     //   email: this.configService.get("database.initialUser.email"),
@@ -435,10 +441,16 @@ export class AuthService {
       const password = this.configService.get(
         `${userConfig.configKey}.password`,
       );
+      console.log("✌️password --->", password);
+      console.log(
+        "✌️process.env.PASSWORD_SALT --->",
+        process.env.PASSWORD_SALT,
+      );
       const hashedPassword = await hash(
         password,
         Number(process.env.PASSWORD_SALT),
       );
+      console.log("✌️hashedPassword --->", hashedPassword);
 
       const userData: CreateInitialUserInterface = {
         firstName: this.configService.get(`${userConfig.configKey}.firstName`),
