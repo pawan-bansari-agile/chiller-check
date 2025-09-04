@@ -20,7 +20,11 @@ import * as nodemailer from "nodemailer";
 import * as smtpTransport from "nodemailer-smtp-transport";
 import Mail from "nodemailer/lib/mailer";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { folderName, tmpFolderName } from "src/common/constants/enum.constant";
+import {
+  AppEnvironment,
+  folderName,
+  tmpFolderName,
+} from "src/common/constants/enum.constant";
 import { CommonService } from "src/common/services/common.service";
 
 @Injectable()
@@ -51,7 +55,7 @@ export class ImageUploadService {
           file &&
           !file.originalname.match(/\.(jpg|jpeg|png|JPG|json|pdf|doc)$/)
         ) {
-          res.status(HttpStatus.BAD_REQUEST).json({
+          return res.status(HttpStatus.BAD_REQUEST).json({
             statusCode: HttpStatus.BAD_REQUEST,
             message:
               "Only jpg,png,jpeg,pdf,doc,docx,mp4,mov,mkv,webm files are allowed!!",
@@ -65,8 +69,11 @@ export class ImageUploadService {
 
           fileResult.push({
             name: filename,
+            size: file.size,
+            realName: file.originalname,
           });
-          file.buffer = fs.readFileSync(file.path);
+          // If multer saved to disk, read from path; otherwise, use buffer directly
+          file.buffer = file.buffer || fs.readFileSync(file.path);
 
           await this.uploadS3(
             file.buffer,
@@ -89,42 +96,97 @@ export class ImageUploadService {
     });
   }
 
-  async moveTempToRealFolder(filename) {
+  /**
+   * Local upload that mirrors S3 key layout: tmp-chiller-check/<moduleName>/<filename>
+   * Returns same response shape as S3 uploader.
+   */
+  async uploadMultipleFileLocal(res, files, params: FileMultipleUploadDto) {
+    const fileResult = [];
+    if (files && files.length > 0) {
+      for (const file of files) {
+        if (
+          file &&
+          !file.originalname.match(/\.(jpg|jpeg|png|JPG|json|pdf|doc)$/)
+        ) {
+          return res.status(HttpStatus.BAD_REQUEST).json({
+            statusCode: HttpStatus.BAD_REQUEST,
+            message:
+              "Only jpg,png,jpeg,pdf,doc,docx,mp4,mov,mkv,webm files are allowed!!",
+            data: false,
+          });
+        } else {
+          const random = this.commonService.generateRandomString(8, "number");
+          const ext = path.extname(file.originalname);
+          const filename = `${random}${ext}`;
+
+          fileResult.push({
+            name: filename,
+            size: file.size,
+            realName: file.originalname,
+          });
+
+          const moduleFolder = params.moduleName || "misc";
+          const localDir = path.join(
+            process.cwd(),
+            tmpFolderName,
+            moduleFolder,
+          );
+          fs.mkdirSync(localDir, { recursive: true });
+
+          const buffer = file.buffer || fs.readFileSync(file.path);
+          const targetPath = path.join(localDir, filename);
+          fs.writeFileSync(targetPath, buffer);
+        }
+      }
+
+      return res.send({
+        statusCode: HttpStatus.OK,
+        message: "Success",
+        data: fileResult,
+      });
+    }
+    return res.send({
+      statusCode: HttpStatus.BAD_REQUEST,
+      message: "Failure",
+      data: [],
+    });
+  }
+
+  async moveTempToRealFolder(filename: string, moduleName?: string) {
     try {
-      const sourceKey = `${tmpFolderName}/` + filename;
-      const destinationKey = `${folderName}/` + filename;
-      // Move to real bucket
+      if (process.env.APP_ENV === AppEnvironment.LOCAL) {
+        const tmpFolder = "tmp-chiller-check";
+        const finalFolder = "chiller-check";
+
+        const fullTmpPath = path.join(process.cwd(), tmpFolder, filename);
+        const fullDestPath = path.join(process.cwd(), finalFolder, filename);
+
+        const destDir = path.dirname(fullDestPath);
+
+        if (!fs.existsSync(fullTmpPath)) {
+          throw new Error(`Temp file not found: ${fullTmpPath}`);
+        }
+
+        fs.mkdirSync(destDir, { recursive: true });
+        fs.renameSync(fullTmpPath, fullDestPath);
+        return;
+      }
+
+      // Default: S3 path (tmp-chiller-check[/module]/filename -> chiller-check[/module]/filename)
       const bucketS3 = process.env.S3_BUCKETS;
+      const sourceKey = `${tmpFolderName}/${moduleName ? moduleName + "/" : ""}${filename}`;
+      const destinationKey = `${folderName}/${moduleName ? moduleName + "/" : ""}${filename}`;
       const copyParams = {
         Bucket: bucketS3,
         CopySource: bucketS3 + "/" + sourceKey,
         Key: destinationKey,
       };
-      await this.s3.send(
-        new CopyObjectCommand(copyParams),
-        async (error, data) => {
-          console.log("data: ", data);
-          if (error) {
-            console.log("FAILED to copy file in real folder", error);
-          }
-          console.log("Image moved to real bucket:");
-          // Delete from temp bucket
-          const deleteParams = {
-            Bucket: bucketS3,
-            Key: sourceKey,
-          };
-          await this.s3.send(
-            new DeleteObjectCommand(deleteParams),
-            (err, data) => {
-              console.log("data: ", data);
-              if (err) {
-                console.log("FAILED to move file from temp folder", err);
-              }
-              console.log("Image deleted from temp bucket:");
-            },
-          );
-        },
-      );
+      await this.s3.send(new CopyObjectCommand(copyParams));
+      const deleteParams = {
+        Bucket: bucketS3,
+        Key: sourceKey,
+      };
+      await this.s3.send(new DeleteObjectCommand(deleteParams));
     } catch (error) {
       console.log("moving image: ", error);
       throw CustomError.UnknownError(error?.message, error?.status);
@@ -306,47 +368,60 @@ export class ImageUploadService {
     }
   }
 
-  /// deleteing all the images from temp bucket which is unused.
+  /// deleting all the images from temp bucket which is unused.
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: "Asia/Kolkata" }) // Runs the cron job daily at midnight
   async deleteAllTempImages() {
     try {
-      console.log("cron running");
-      const params = {
-        Bucket: this.bucketS3,
-        Prefix: tmpFolderName,
-      };
+      const isLocal = process.env.APP_ENV === AppEnvironment.LOCAL;
+      if (isLocal) {
+        // remove local image
+        const dirPath = "./tmp-chiller-check";
 
-      const listObjectsResponse = await this.s3.send(
-        new ListObjectsV2Command(params),
-      );
-      if (
-        !listObjectsResponse.Contents ||
-        listObjectsResponse.Contents.length === 0
-      ) {
-        console.log("No objects to delete");
-        return;
+        if (fs.existsSync(dirPath)) {
+          fs.readdirSync(dirPath).forEach((fileOrFolder) => {
+            const fullPath = path.join(dirPath, fileOrFolder);
+            fs.rmSync(fullPath, { recursive: true, force: true });
+          });
+        }
+      } else {
+        console.log("cron running");
+        const params = {
+          Bucket: this.bucketS3,
+          Prefix: tmpFolderName,
+        };
+
+        const listObjectsResponse = await this.s3.send(
+          new ListObjectsV2Command(params),
+        );
+        if (
+          !listObjectsResponse.Contents ||
+          listObjectsResponse.Contents.length === 0
+        ) {
+          console.log("No objects to delete");
+          return;
+        }
+
+        const keys = listObjectsResponse.Contents?.map((object) => ({
+          Key: object.Key,
+        }));
+
+        if (keys?.length === 0) {
+          console.log("No objects to delete");
+          return;
+        }
+        console.log("Keys to delete:", keys);
+
+        const removeParams = {
+          Bucket: this.bucketS3,
+          Delete: {
+            Objects: keys,
+            Quiet: false,
+          },
+        };
+
+        const command = new DeleteObjectsCommand(removeParams);
+        await this.s3.send(command);
       }
-
-      const keys = listObjectsResponse.Contents?.map((object) => ({
-        Key: object.Key,
-      }));
-
-      if (keys?.length === 0) {
-        console.log("No objects to delete");
-        return;
-      }
-      console.log("Keys to delete:", keys);
-
-      const removeParams = {
-        Bucket: this.bucketS3,
-        Delete: {
-          Objects: keys,
-          Quiet: false,
-        },
-      };
-
-      const command = new DeleteObjectsCommand(removeParams);
-      await this.s3.send(command);
     } catch (error) {
       console.error("Error deleting images:", error);
     }

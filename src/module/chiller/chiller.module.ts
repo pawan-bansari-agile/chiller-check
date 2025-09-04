@@ -13,6 +13,17 @@ import {
   ScheduledJob,
   ScheduledJobSchema,
 } from "src/common/schema/scheduled-job.schema";
+import { NotificationService } from "src/common/services/notification.service";
+import {
+  Notification,
+  NotificationSchema,
+} from "src/common/schema/notification.schema";
+import { Device, DeviceSchema } from "src/common/schema/device.schema";
+import { Logs, LogsSchema } from "src/common/schema/logs.schema";
+import {
+  ProblemAndSolutions,
+  ProblemAndSolutionsSchema,
+} from "src/common/schema/problemAndSolutions.schema";
 
 @Module({
   imports: [
@@ -23,9 +34,18 @@ import {
       { name: User.name, schema: UserSchema },
       { name: Timeline.name, schema: TimelineSchema },
       { name: ScheduledJob.name, schema: ScheduledJobSchema },
+      { name: Notification.name, schema: NotificationSchema },
+      { name: Device.name, schema: DeviceSchema },
+      { name: Logs.name, schema: LogsSchema },
+      { name: ProblemAndSolutions.name, schema: ProblemAndSolutionsSchema },
     ]),
   ],
   controllers: [ChillerController],
-  providers: [ChillerService, EmailService, SchedulerService],
+  providers: [
+    ChillerService,
+    EmailService,
+    SchedulerService,
+    NotificationService,
+  ],
 })
 export class ChillerModule {}

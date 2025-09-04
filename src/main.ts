@@ -7,7 +7,9 @@ import { AppModule } from "./app.module";
 import { LoggerService } from "./common/logger/logger.service";
 import { HttpExceptionFilter } from "./common/exceptions/http-exception.filter";
 import helmet from "helmet";
+import * as firebase from "firebase-admin";
 import { AppEnvironment } from "./common/constants/enum.constant";
+import fireBaseConfig from "./config/firebase.config";
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -59,9 +61,9 @@ async function bootstrap() {
 
   /* The code `firebase.initializeApp()` is initializing the Firebase Admin SDK with the provided
   configuration. */
-  // firebase.initializeApp({
-  //   credential: firebase.credential.cert(fireBaseConfig),
-  // });
+  firebase.initializeApp({
+    credential: firebase.credential.cert(fireBaseConfig),
+  });
 
   await app.listen(appConfig.port);
 }

@@ -9,6 +9,7 @@ import {
   Put,
   Query,
   Patch,
+  Req,
 } from "@nestjs/common";
 import { FacilityService } from "./facility.service";
 
@@ -64,8 +65,9 @@ export class FacilityController {
   @ApiBearerAuth()
   // @Public()
   @ResponseMessage(FACILITY.FACILITY_CREATE)
-  create(@Body() createFacilityDto: CreateFacilityDTO) {
-    return this.facilityService.create(createFacilityDto);
+  create(@Body() createFacilityDto: CreateFacilityDTO, @Req() req) {
+    const loggedInUserId = req["user"]["_id"];
+    return this.facilityService.create(createFacilityDto, loggedInUserId);
   }
 
   @Post("list")
@@ -136,8 +138,9 @@ export class FacilityController {
   @ApiBearerAuth()
   @ResponseMessage(FACILITY.FACILITY_BY_ID)
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.facilityService.findOne(id);
+  findOne(@Param("id") id: string, @Req() req) {
+    const loggedInUserId = req["user"]["_id"];
+    return this.facilityService.findOne(id, loggedInUserId);
   }
 
   @Put(":id")
@@ -171,8 +174,10 @@ export class FacilityController {
   update(
     @Param("id") id: string,
     @Body() updateFacilityDto: UpdateFacilityDto,
+    @Req() req,
   ) {
-    return this.facilityService.update(id, updateFacilityDto);
+    const loggedInUserId = req["user"]["_id"];
+    return this.facilityService.update(id, updateFacilityDto, loggedInUserId);
   }
 
   @Patch(":facilityId")
@@ -190,8 +195,10 @@ export class FacilityController {
   async updateFacilityStatus(
     @Param("facilityId") facilityId: string, // Facility ID from the URL parameter
     @Body() body: UpdateFacilityStatusDto, // Request body with new isActive value
+    @Req() req,
   ) {
-    return this.facilityService.updateStatus(facilityId, body);
+    const loggedInUserId = req["user"]["_id"];
+    return this.facilityService.updateStatus(facilityId, body, loggedInUserId);
   }
 
   @Post("findAll/activeFacilities")
@@ -211,8 +218,11 @@ export class FacilityController {
     description: "Forbidden: Only an Admin can list chillers!",
   })
   @ResponseMessage(FACILITY.ACTIVE_FACILITY_LISTED)
-  findAllActiveChillers(@Body() dto?: ActiveFacilities) {
-    return this.facilityService.findAllActiveChillers(dto);
+  findAllActiveChillers(
+    @Request() req: Request,
+    @Body() dto?: ActiveFacilities,
+  ) {
+    return this.facilityService.findAllActiveChillers(req, dto);
   }
 
   @Delete(":id")

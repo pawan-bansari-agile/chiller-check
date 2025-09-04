@@ -59,8 +59,8 @@ export class UserController {
   @ResponseMessage(RESPONSE_SUCCESS.USER_INSERTED)
   @ApiBearerAuth()
   // @Public()
-  create(@Body() createUserDto: CreateUserDto, @Req() req) {
-    return this.userService.createUser(createUserDto, req);
+  create(@Body() createUserDto: CreateUserDto) {
+    return this.userService.createUser(createUserDto);
   }
 
   // Route to update user details
@@ -194,8 +194,9 @@ export class UserController {
   @ApiBearerAuth()
   // @ResponseMessage(USER.USER_STATUS_UPDATED)
   @ApiOperation({ summary: "Update user status (activate/deactivate)" })
-  async updateUserStatus(@Body() dto: UpdateUserStatusDto) {
-    return this.userService.updateUserStatus(dto);
+  async updateUserStatus(@Body() dto: UpdateUserStatusDto, @Req() req) {
+    const loggedInUserId = req["user"]["_id"];
+    return this.userService.updateUserStatus(dto, loggedInUserId);
   }
 
   @Post("assigned-to-chillers")

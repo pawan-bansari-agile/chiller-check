@@ -90,6 +90,7 @@ export const RESPONSE_ERROR = {
   PROFILE_UPDATE: "Your account has been updated. Please log in again.",
   CHILLER_ID_REQUIRED: "Chiller Details are required for getting the timeline.",
   LOG_NOT_FOUND: "Log entry not found!",
+  MAINTENANCE_LOG_NOT_FOUND: "Maintenance Log entry not found!",
   FREE_TRIAL_EXPIRED:
     "Your free 30-day trial has expired. Please contact our system admin at support@chillercheck.com to activate your account to continue using the system.",
   COMPANY_INACTIVE:
@@ -98,6 +99,9 @@ export const RESPONSE_ERROR = {
   NO_ACTIVE_CHILLERS: "No Active chillers found!",
   NO_ACTIVE_COMPANIES: "No Active companies found!",
   NO_ACTIVE_FACILITIES: "No Active facilities found!",
+  REPORT_NOT_FOUND: "Report not found.",
+  NO_OWNER: "You are not the owner of the report..",
+  DUPLICATE_READING_DATE: "A log cannot have duplicate reading time!",
 };
 
 export const AUTHENTICATION = {
@@ -154,6 +158,12 @@ export const CHILLER = {
   CHILLER_STATUS_UPDATED: "Chiller status updated successfully",
   CHILLER_UPDATE: "Chiller details updated successfully.",
   ACTIVE_CHILLER_LISTED: "All Active Chillers listed",
+  SERIAL_NUMBER_EXIST: "Chiller with this serial number is already exist.",
+  CHILLER_EXPORT: "Chillers Exported successfully.",
+};
+
+export const DASHBOARD = {
+  DASHBOARD_LIST: "Dashboard details fetch successfully.",
 };
 
 export const LOGS = {
@@ -162,6 +172,27 @@ export const LOGS = {
   LOG_LIST: "Log list fetch successfully.",
   LOG_BY_ID: "Log fetched successfully",
   LOG_DELETED: "Log details deleted successfully",
+  LOG_EXPORT: "Log Exported successfully.",
+  LOG_IMPORT: "Log Imported successfully.",
+};
+export const MAINTENANCE_LOGS = {
+  MAINTENANCE_CREATE: "Maintenance record added successfully.",
+  MAINTENANCE_UPDATED: "Maintenance record updated successfully.",
+  MAINTENANCE_LIST: "Maintenance record list fetch successfully.",
+  MAINTENANCE_BY_ID: "Maintenance fetched successfully",
+  MAINTENANCE_DELETED: "Maintenance record deleted successfully.",
+  MAINTENANCE_EXPORT: "Maintenance Exported successfully.",
+};
+
+export const REPORTS = {
+  REPORTS_CREATE: "Reports added successfully.",
+  REPORTS_UPDATED: "Reports updated successfully.",
+  REPORTS_LIST: "Reports list fetch successfully.",
+  REPORTS_BY_ID: "Reports fetched successfully",
+  REPORTS_DELETED: "Reports deleted successfully.",
+  REPORTS_EXPORT: "Reports Exported successfully.",
+  REPORTS_USER: "Report user list fetched successfully.",
+  USER_NOT_ACCESS_REPORT: "User don't have access to this report.",
 };
 
 export const TIMELINE = {
@@ -186,4 +217,8 @@ export const FAQS = {
   FAQS_EDITED: "FAQ updated successfully.",
   FAQS_DELETED: "FAQ deleted successfully.",
   FAQS_EXISTS: "FAQ already exists.",
+};
+export const NOTIFICATION = {
+  NOTIFICATION_LIST: "Notification list successfully.",
+  NOTIFICATION_DELETED: "Notification deleted successfully.",
 };

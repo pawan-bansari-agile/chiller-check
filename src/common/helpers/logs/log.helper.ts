@@ -3,9 +3,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { BadRequestException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
-import { Model } from "mongoose";
+import mongoose, { Model } from "mongoose";
 import {
   CHILLER_STATUS,
+  ChillerStatus,
   MEASUREMENT_UNITS,
 } from "src/common/constants/enum.constant";
 import { AltitudeCorrection } from "src/common/schema/altitudeCorrection.schema";
@@ -16,6 +17,19 @@ import {
 } from "src/common/schema/conversion.schema";
 import { Facility } from "src/common/schema/facility.schema";
 import { Logs } from "src/common/schema/logs.schema";
+import {
+  differenceInDays,
+  differenceInHours,
+  addDays,
+  subYears,
+  isAfter,
+  differenceInCalendarDays,
+} from "date-fns";
+import { TABLE_NAMES } from "src/common/constants/table-name.constant";
+import { Company } from "src/common/schema/company.schema";
+import { HistChillerPerformance } from "src/common/schema/hist-chiller-performance.schema";
+import { HistFacilityPerformance } from "src/common/schema/hist-location-performance.schema";
+import { HistCompanyPerformance } from "src/common/schema/hist-company-performance.schema";
 // import dayjs from "dayjs";
 // import utc from "dayjs/plugin/utc";
 // import timezone from "dayjs/plugin/timezone";
@@ -25,6 +39,25 @@ const timezone = require("dayjs/plugin/timezone");
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+interface PerfSummary {
+  averageLoss: number;
+  targetCost: number;
+  lossCost: number;
+  actualCost: number;
+  kwhLoss: number;
+  btuLoss: number;
+  co2: number;
+  AvgExcessCondApp: number;
+  AvgExcessEvapApp: number;
+  AvgOtherLoss: number;
+}
+
+interface DateRange {
+  label: string;
+  startDate: Date;
+  endDate: Date;
+}
 
 // Helper to handle unit and locale-specific formatting
 export class LogRecordHelper {
@@ -83,7 +116,7 @@ export class LogRecordHelper {
   }
 
   // Run hours validation
-  static validateRunHours(
+  static validateRunHoursv1(
     runHours: number,
     lastRunHours: number,
     nextRunHours: number,
@@ -107,6 +140,30 @@ export class LogRecordHelper {
         `Run Hours must be between ${lowerLimit} and ${upperLimit}.`,
       );
     }
+  }
+
+  static validateRunHours(
+    thisRecordRunHours: number,
+    thisRecordReadingDate: Date,
+    lastRecordRunHours: number,
+    lastRecordReadingDate: Date,
+  ): boolean {
+    // Calculate difference in hours between the two reading dates
+    const hoursBetweenDates =
+      (new Date(thisRecordReadingDate).getTime() -
+        new Date(lastRecordReadingDate).getTime()) /
+      (1000 * 60 * 60);
+
+    // Calculate possible maximum hours (last run hours + elapsed time + buffer)
+    const possibleHours = hoursBetweenDates + lastRecordRunHours + 3;
+
+    // Validate run hours based on possible hours and sequence
+    const isValid = !(
+      thisRecordRunHours > possibleHours ||
+      thisRecordRunHours < lastRecordRunHours
+    );
+
+    return isValid;
   }
 
   // Helper to check if a value is between a specific range
@@ -167,10 +224,12 @@ export class LogRecordHelper {
     const timeZoneMap: Record<string, string> = {
       EST: "America/New_York",
       PST: "America/Los_Angeles",
-      IST: "Asia/Kolkata",
+      CST: "America/Chicago",
       MST: "America/Denver",
       AKST: "America/Anchorage",
-      HAST: "Pacific/Honolulu",
+      HST: "Pacific/Honolulu", // Hawaii
+      AST: "America/Halifax", // Atlantic (Canada)
+      NST: "America/St_Johns", // Newfoundland
     };
 
     // const ianaZone = timeZoneMap[readingTimeZone.toUpperCase()];
@@ -183,7 +242,13 @@ export class LogRecordHelper {
 
     // Combine and parse the date-time string in the specified timezone
     const localDateTimeStr = `${readingDate} ${readingTime}`; // '07-25-2025 2:17 PM'
-    const parsed = dayjs.tz(localDateTimeStr, "MM-DD-YYYY h:mm A", ianaZone);
+    const parsed = dayjs.tz(
+      localDateTimeStr,
+      ["MM-DD-YYYY HH:mm", "MM-DD-YYYY h:mm A"],
+      ianaZone,
+      true, // strict mode
+    );
+    // const parsed = dayjs.tz(localDateTimeStr, "MM-DD-YYYY h:mm A", ianaZone);
 
     if (!parsed.isValid()) {
       throw new Error(`Invalid date/time: ${localDateTimeStr}`);
@@ -200,10 +265,11 @@ export class LogRecordHelper {
     const cost = energyCost ?? chiller.energyCost ?? 0;
     const avgLoad = chiller.avgLoadProfile ?? 0;
     const tons = chiller.tons ?? 0;
+    const kwr = chiller.kwr ?? 0;
     const efficiency = chiller.efficiencyRating ?? 1;
 
     if (chiller.unit == MEASUREMENT_UNITS.SIMetric) {
-      return (1 / efficiency) * cost * tons * avgLoad * 0.01;
+      return (1 / efficiency) * cost * kwr * avgLoad * 0.01;
     } else {
       return efficiency * cost * tons * avgLoad * 0.01;
     }
@@ -213,6 +279,11 @@ export class LogRecordHelper {
     const hoursPerWeek = chiller.weeklyHours ?? 0;
     const weeksPerYear = chiller.weeksPerYear ?? 0;
     const costPerHour = this.calculateTargetCostPerHour(chiller);
+    console.log("✌️costPerHour for SIMetrics chiller --->", costPerHour);
+    console.log(
+      "✌️hoursPerWeek * weeksPerYear * costPerHour --->",
+      hoursPerWeek * weeksPerYear * costPerHour,
+    );
     return hoursPerWeek * weeksPerYear * costPerHour;
   }
 
@@ -360,63 +431,143 @@ export class LogRecordHelper {
   }
 
   static getLoadFactor(log: Logs, chiller: Chiller, maxAmp: number): number {
-    return chiller.useLoad ? maxAmp / 100 : maxAmp / chiller.fullLoadAmps;
+    const result = chiller.useLoad
+      ? maxAmp / 100
+      : maxAmp / chiller.fullLoadAmps;
+    console.log("✌️result from getLoadFactor --->", result);
+    return result;
   }
 
   static getCondenserApproach(log: Logs, chiller: Chiller): number {
     const maxAmp = this.getMaxAmp(log);
+    console.log("✌️maxAmp --->", maxAmp);
     const loadFactor = this.getLoadFactor(log, chiller, maxAmp);
+    console.log("✌️loadFactor --->", loadFactor);
 
     let approach = 0;
-    if (loadFactor > 0) {
-      const refTemp = chiller.highPressureRefrig
-        ? log.calculatedCondRefrigTemp // from getConversionInfo
-        : log.condRefrigTemp;
+    if (loadFactor) {
+      if (loadFactor > 0) {
+        const refTemp = chiller?.highPressureRefrig
+          ? log.calculatedCondRefrigTemp // from getConversionInfo
+          : log.condRefrigTemp;
 
-      approach = (refTemp - log.condOutletTemp) / loadFactor;
+        approach = (refTemp - log.condOutletTemp) / loadFactor;
+      }
     }
 
     // log.condApproach = approach;
     // log.actualLoad = loadFactor * 100;
-    return approach;
+    if (approach) {
+      return approach;
+    } else {
+      return 0;
+    }
   }
 
+  // static calcEvapTempLoss(log: Logs, chiller: Chiller): number {
+  //   let loss = 0;
+
+  //   // Assume 44°F as the benchmark evap outlet temperature
+  //   const baseTemp =
+  //     chiller.unit == MEASUREMENT_UNITS.SIMetric
+  //       ? this.convertTemp('TempF', 'TempC', 44)
+  //       : 44;
+
+  //   const diff = log.evapOutletTemp - baseTemp;
+  //   const tempLoss = diff > 0 ? diff : 0;
+
+  //   loss =
+  //     chiller.unit == MEASUREMENT_UNITS.SIMetric
+  //       ? tempLoss * 3.6
+  //       : tempLoss * 2;
+
+  //   if (loss < 2) loss = 0;
+
+  //   // log.evapTempLoss = loss;
+  //   return loss;
+  // }
   static calcEvapTempLoss(log: Logs, chiller: Chiller): number {
-    let loss = 0;
+    let evapTempVariance = 0;
+    let evapTempLoss = 0;
 
-    // Assume 44°F as the benchmark evap outlet temperature
-    const baseTemp =
-      chiller.unit == MEASUREMENT_UNITS.SIMetric
-        ? this.convertTemp("TempF", "TempC", 44)
-        : 44;
+    let finalOutletTemp: number;
+    let designOutletTemp: number;
 
-    const diff = log.evapOutletTemp - baseTemp;
-    const tempLoss = diff > 0 ? diff : 0;
+    // Ensure temps are in Fahrenheit
+    if (chiller.unit === MEASUREMENT_UNITS.SIMetric) {
+      finalOutletTemp = this.convertTemp("TEMPC", "TEMPF", log.evapOutletTemp);
+      designOutletTemp = this.convertTemp(
+        "TEMPC",
+        "TEMPF",
+        chiller.evapDOWTemp,
+      );
+    } else {
+      finalOutletTemp = log.evapOutletTemp;
+      designOutletTemp = chiller.evapDOWTemp;
+    }
 
-    loss =
-      chiller.unit == MEASUREMENT_UNITS.SIMetric
-        ? tempLoss * 3.6
-        : tempLoss * 2;
+    // If actual temp <= design temp → calculate variance
+    if (finalOutletTemp <= designOutletTemp) {
+      evapTempVariance = designOutletTemp - finalOutletTemp;
+    }
 
-    if (loss < 2) loss = 0;
+    // Loss is 2% per °F of variance
+    evapTempLoss = evapTempVariance * 2;
 
-    // log.evapTempLoss = loss;
-    return loss;
+    // Ignore loss if less than 2%
+    if (evapTempLoss < 2) {
+      evapTempLoss = 0;
+    }
+
+    // In CF it sets back to log record, here we just return
+    return evapTempLoss;
   }
 
-  static calcEvapAppLoss(log: Logs, chiller: Chiller): number {
-    const approach = (log.evapRefrigTemp ?? 0) - (log.evapOutletTemp ?? 0);
-    const cda = chiller.evapApproach ?? 5;
+  // static calcEvapAppLoss(log: Logs, chiller: Chiller): number {
+  //   const approach = (log.evapRefrigTemp ?? 0) - (log.evapOutletTemp ?? 0);
+  //   const cda = chiller.evapApproach ?? 5;
 
-    const variance = approach > cda ? approach - cda : 0;
+  //   const variance = approach > cda ? approach - cda : 0;
+  //   let loss =
+  //     chiller.unit == MEASUREMENT_UNITS.SIMetric
+  //       ? variance * 3.6
+  //       : variance * 2;
+
+  //   if (loss < 2) loss = 0;
+
+  //   // log.evapAppLoss = loss;
+  //   return loss;
+  // }
+
+  static async calcEvapAppLoss(
+    log: Logs,
+    chiller: Chiller,
+    conversionModel: Model<Conversion>,
+  ): Promise<number> {
+    // Step 1: Get variance (full equivalent of CFML getEvapAppVariance)
+    const evapAppVariance = await this.getEvapAppVariance(
+      log,
+      chiller,
+      conversionModel,
+    );
+
+    // Step 2: Adjust variance for load profile
+    const adjustedVariance = evapAppVariance * chiller.avgLoadProfile * 0.01;
+
+    // Step 3: Calculate loss depending on unit system
     let loss =
-      chiller.unit == MEASUREMENT_UNITS.SIMetric
-        ? variance * 3.6
-        : variance * 2;
+      chiller.unit === MEASUREMENT_UNITS.SIMetric
+        ? adjustedVariance * 3.6
+        : adjustedVariance * 2;
 
-    if (loss < 2) loss = 0;
+    // Step 4: Apply threshold rule
+    if (loss < 2) {
+      loss = 0;
+    }
 
-    // log.evapAppLoss = loss;
+    // Step 5: Write back into log record (like CFML setEvapAppLoss)
+    log.evapAppLoss = loss;
+
     return loss;
   }
 
@@ -695,6 +846,7 @@ export class LogRecordHelper {
     );
 
     // Step 2: Correct the pressure for altitude
+    console.log("✌️log.altitudeCorrection --->", log.altitudeCorrection);
     const correctedPressure = evapPSIGPressure - (log.altitudeCorrection || 0);
 
     // Step 3: Get temp from DAO (based on whether original was PSIA or not)
@@ -1004,6 +1156,7 @@ export class LogRecordHelper {
       conversionQuery = await this.getConversionInfoForHighPressure(
         chiller.refrigType,
         finalCondPressure,
+        conversionModel,
       );
 
       thisCondRefrigTemp =
@@ -1023,33 +1176,44 @@ export class LogRecordHelper {
     condRefrigTemp: number,
     conversionModel?: Model<Conversion>,
   ) {
-    const formattedTemp = parseFloat(condRefrigTemp.toFixed(1));
+    const formattedTemp = parseFloat(condRefrigTemp?.toFixed(1));
 
-    const result = await conversionModel
-      .findOne({
-        refrigName: refrigName,
-        tempF: { $lte: formattedTemp },
-      })
-      .sort({ tempF: -1 }) // DESC
-      .select({ tempF: 1, psig: 1 })
-      .lean();
+    let result;
 
-    if (!result) {
-      throw new Error(
-        `Conversion data not found for RefrigID=${refrigName} and TempF<=${formattedTemp}`,
-      );
+    if (formattedTemp) {
+      result = await conversionModel
+        .findOne({
+          refrigName: refrigName,
+          tempF: { $lte: formattedTemp },
+        })
+        .sort({ tempF: -1 }) // DESC
+        .select({ tempF: 1, psig: 1 })
+        .lean();
     }
 
-    return {
-      tempF: result.tempF,
-      psig: result.psig,
-    };
+    // if (!result) {
+    //   throw new Error(
+    //     `Conversion data not found for RefrigID=${refrigName} and TempF<=${formattedTemp}`
+    //   );
+    // }
+
+    if (result) {
+      return {
+        tempF: result.tempF,
+        psig: result.psig,
+      };
+    } else {
+      return {
+        tempF: 0,
+        psig: 0,
+      };
+    }
   }
 
   static async getConversionInfoForHighPressure(
     refrigName: string,
     condPressure: number,
-    conversionModel?: Model<ConversionDocument>,
+    conversionModel?: Model<Conversion>,
   ) {
     const result = await conversionModel
       .findOne({
@@ -1204,12 +1368,12 @@ export class LogRecordHelper {
     return btuLoss;
   }
 
-  static calcCO2(logRecord: Logs) {
+  static calcCO2(logRecord: Logs, emissionFactor: number) {
     const kwhLoss = logRecord.KWHLoss;
     let co2 = 0;
 
     if (typeof kwhLoss === "number") {
-      co2 = (kwhLoss * 1.1835) / 2000;
+      co2 = (kwhLoss * emissionFactor) / 2000;
     } else {
       co2 = 0;
     }
@@ -1395,4 +1559,1942 @@ export class LogRecordHelper {
 
     return logData;
   }
+
+  static async createPerformanceSummaryForChiller(
+    chillerID: string,
+    logsModel: Model<Logs>,
+    chillerModel: Model<Chiller>,
+  ) {
+    const rangeTypes = [1, 2, 3];
+    // const thisYear = new Date().getFullYear();
+    const today = new Date();
+
+    const results: any = {};
+    let perfSummary = {
+      avgLoss: 0,
+      targetCost: 0,
+      lossCost: 0,
+      actualCost: 0,
+      kwhLoss: 0,
+      BTULoss: 0,
+      CO2: 0,
+      avgExcessCondApp: 0,
+      avgExcessEvapApp: 0,
+      avgOtherLoss: 0,
+    };
+
+    for (const rangeType of rangeTypes) {
+      let startDate: Date;
+      let endDate: Date;
+      // const endDate = new Date(); // today
+      // const startDate = new Date();
+
+      // if (i === 1) {
+      //   startDate = new Date(thisYear, 0, 1);
+      //   endDate = new Date();
+      // } else if (i === 2) {
+      //   startDate = new Date(thisYear - 1, 0, 1);
+      //   endDate = subYears(new Date(), 1);
+      // } else if (i === 3) {
+      //   startDate = subYears(new Date(), 1);
+      //   endDate = new Date();
+      // }
+      if (rangeType === 1) {
+        // startDate.setFullYear(endDate.getFullYear() - 1);
+        // This YTD → Jan 1 current year → today
+        // old logic
+        // startDate = new Date(Date.UTC(today.getFullYear(), 0, 1, 0, 0, 0, 0));
+        // endDate = new Date(today); // today (keeps actual now timestamp)
+        startDate = new Date(new Date().getFullYear(), 0, 1);
+        endDate = new Date(); // today
+      } else if (rangeType === 2) {
+        // startDate.setFullYear(endDate.getFullYear() - 2);
+        // Last YTD → Jan 1 last year → today
+        // old logic
+        // startDate = new Date(
+        //   Date.UTC(today.getFullYear() - 1, 0, 1, 0, 0, 0, 0)
+        // );
+        // endDate = new Date(today); // today
+        const lastYear = new Date().getFullYear() - 1;
+        startDate = new Date(lastYear, 0, 1); // Jan 1 last year
+
+        endDate = new Date();
+        endDate.setFullYear(endDate.getFullYear() - 1); // today - 1 year
+      } else if (rangeType === 3) {
+        // startDate.setFullYear(endDate.getFullYear() - 3);
+        // Last 12 months → Full last year
+        // old logic
+        // startDate = new Date(
+        //   Date.UTC(today.getFullYear() - 1, 0, 1, 0, 0, 0, 0)
+        // );
+        // endDate = new Date(
+        //   Date.UTC(today.getFullYear() - 1, 11, 31, 23, 59, 59, 999)
+        // );
+        endDate = new Date(); // today
+        startDate = new Date();
+        startDate.setFullYear(startDate.getFullYear() - 1); // today - 1 year
+      }
+
+      const logRecords = await this.getLogRecordsInRange(
+        startDate,
+        endDate,
+        chillerID,
+        logsModel,
+      );
+      console.log("✌️logRecords from helper --->", logRecords);
+
+      let useRunHours = false;
+      let runHoursForRange = 0;
+
+      if (logRecords.length > 0) {
+        // Replace with actual chiller.getUseRunHours() logic
+        // const chillerUsesRunHours = true;
+        const chiller = await chillerModel.findById({
+          _id: new mongoose.Types.ObjectId(chillerID),
+        });
+
+        if (!chiller.useRunHours) {
+          // useRunHours = true;
+          useRunHours = false;
+        } else {
+          useRunHours = this.checkRunHoursForRange(logRecords);
+        }
+        console.log("✌️useRunHours --->", useRunHours);
+
+        if (useRunHours) {
+          runHoursForRange = await this.getRunHoursForRange(
+            logRecords,
+            chillerID,
+            startDate,
+            logsModel,
+          );
+        }
+        console.log(
+          "✌️runHoursForRange from chiller performance --->",
+          runHoursForRange,
+        );
+
+        perfSummary = await this.getPerformanceForRange(
+          logRecords,
+          useRunHours,
+          startDate,
+          logsModel,
+          chillerModel,
+        );
+      } else {
+        perfSummary = {
+          avgLoss: 0,
+          targetCost: 0,
+          lossCost: 0,
+          actualCost: 0,
+          kwhLoss: 0,
+          BTULoss: 0,
+          CO2: 0,
+          avgExcessCondApp: 0,
+          avgExcessEvapApp: 0,
+          avgOtherLoss: 0,
+        };
+        runHoursForRange = 0;
+      }
+
+      // if (i === 1) {
+      //   myStruct = {
+      //     perfSummary,
+      //     // logRecords,
+      //     startDate,
+      //     endDate,
+      //     useRunHours,
+      //   };
+      // }
+      results[rangeType] = {
+        perfSummary,
+        startDate,
+        endDate,
+        useRunHours,
+        runHours: runHoursForRange,
+      };
+
+      // await this.saveRunHoursForRange(chillerID, i, runHoursForRange);
+      // await this.savePerformanceSummary(chillerID, i, perfSummary);
+    }
+
+    // console.log('✌️results --->', results);
+
+    const roundedResponse = LogRecordHelper.applyRounding(results);
+
+    return roundedResponse;
+  }
+
+  static applyRounding(response: Record<string, any>) {
+    const results: Record<string, any> = {};
+
+    for (const [key, entry] of Object.entries(response)) {
+      const perfSummary = (entry as any).perfSummary || {};
+      const roundedPerfSummary: Record<string, any> = {};
+
+      for (const [field, value] of Object.entries(perfSummary)) {
+        if (typeof value === "number") {
+          roundedPerfSummary[field] =
+            LogRecordHelper.roundToFourDecimals(value);
+        } else {
+          roundedPerfSummary[field] = value;
+        }
+      }
+
+      results[key] = {
+        ...(entry as any),
+        perfSummary: roundedPerfSummary,
+      };
+    }
+
+    return results;
+  }
+
+  static async getLogRecordsInRange(
+    startDate: Date,
+    endDate: Date,
+    chillerID: string,
+    logsModel: Model<Logs>,
+  ) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    console.log("✌️startDate (UTC) --->", start.toISOString());
+    console.log("✌️endDate (UTC) --->", end.toISOString());
+    console.log("✌️chillerID --->", chillerID);
+
+    // const existingLog = await logsModel.find({ chillerId: chillerID });
+    // console.log('✌️existingLog --->', existingLog);
+
+    const result = await logsModel
+      .find({
+        chillerId: mongoose.isValidObjectId(chillerID)
+          ? new mongoose.Types.ObjectId(chillerID)
+          : chillerID,
+        isDeleted: false,
+        // readingDateUTC: {
+        //   $gte: start,
+        //   $lt: addDays(end, 1), // makes the end date inclusive
+        // },
+        $expr: {
+          $and: [
+            { $gte: [{ $toDate: "$readingDateUTC" }, start] },
+            { $lt: [{ $toDate: "$readingDateUTC" }, addDays(end, 1)] },
+          ],
+        },
+      })
+      .sort({ readingDateUTC: -1 }) // DESC
+      .lean();
+    console.log("✌️result --->", result);
+
+    return result;
+  }
+
+  static checkRunHoursForRange(logRecords: any[]): boolean {
+    let useRunHours = true;
+
+    if (logRecords.length === 1 && isNaN(logRecords[0].runHours)) {
+      return false;
+    }
+
+    for (let idx = 0; idx < logRecords.length - 1; idx++) {
+      const current = logRecords[idx];
+      const next = logRecords[idx + 1];
+
+      if (isNaN(current.runHours) || isNaN(next.runHours)) {
+        useRunHours = false;
+        break;
+      }
+
+      const validRunHours = this.validateRunHours(
+        current.runHours,
+        current.readingDateUTC,
+        next.runHours,
+        next.readingDateUTC,
+      );
+
+      if (!validRunHours) {
+        useRunHours = false;
+        // variables.logRecordBO.setInvalidRunHoursFlag(next.LogID, false) → implement if needed
+      }
+    }
+
+    return useRunHours;
+  }
+
+  static async getRunHoursForRange(
+    logRecords: any[],
+    chillerID: string,
+    startDate: Date,
+    logsModel: Model<Logs>,
+  ) {
+    let runHours = 0;
+    const daysBetween = differenceInDays(
+      new Date(logRecords[logRecords.length - 1].readingDateUTC),
+      new Date(logRecords[0].readingDateUTC),
+    );
+
+    const nextEarliestRecord = await this.getNextEarliestRecord(
+      startDate,
+      chillerID,
+      logsModel,
+    );
+    console.log("✌️nextEarliestRecord --->", nextEarliestRecord);
+
+    if (
+      !isNaN(logRecords[0].runHours) &&
+      !isNaN(logRecords[logRecords.length - 1].runHours)
+    ) {
+      if (
+        differenceInDays(
+          startDate,
+          new Date(logRecords[logRecords.length - 1].readingDateUTC),
+        ) > 7 ||
+        logRecords.length === 1
+      ) {
+        if (nextEarliestRecord && !isNaN(nextEarliestRecord.runHours)) {
+          const daysTillStart = differenceInDays(
+            new Date(nextEarliestRecord.readingDateUTC),
+            startDate,
+          );
+          const daysToFirstRecord = differenceInDays(
+            new Date(nextEarliestRecord.readingDateUTC),
+            new Date(logRecords[logRecords.length - 1].readingDateUTC),
+          );
+          const dateRatio =
+            daysToFirstRecord !== 0 ? daysTillStart / daysToFirstRecord : 0;
+          const startRunHours =
+            (logRecords[logRecords.length - 1].runHours -
+              nextEarliestRecord.runHours) *
+              dateRatio +
+            nextEarliestRecord.runHours;
+          runHours = Math.abs(logRecords[0].runHours - startRunHours);
+        } else {
+          const avgRunHoursPerDay =
+            daysBetween !== 0
+              ? Math.abs(
+                  logRecords[logRecords.length - 1].runHours -
+                    logRecords[0].runHours,
+                ) / daysBetween
+              : 0;
+          let startRunHours =
+            logRecords[logRecords.length - 1].runHours -
+            differenceInDays(
+              startDate,
+              new Date(logRecords[logRecords.length - 1].readingDateUTC),
+            ) *
+              avgRunHoursPerDay;
+          if (startRunHours < 0) startRunHours = 0;
+          runHours = Math.abs(logRecords[0].runHours - startRunHours);
+        }
+      } else {
+        runHours = Math.abs(
+          logRecords[logRecords.length - 1].runHours - logRecords[0].runHours,
+        );
+      }
+    }
+
+    return runHours;
+  }
+
+  static async getNextEarliestRecord(
+    endDate: Date,
+    chillerID: string,
+    logsModel: Model<Logs>,
+  ) {
+    const endDateISO = new Date(endDate).toISOString();
+
+    const result = await logsModel
+      .findOne({
+        chillerId: new mongoose.Types.ObjectId(chillerID),
+        readingDateUTC: { $lte: endDateISO },
+      })
+      .sort({ readingDateUTC: -1 }) // DESC to get the most recent before or equal to endDate
+      .lean();
+
+    return result || null;
+  }
+
+  static async getPerformanceForRange(
+    logRecords: Logs[],
+    useRunHours: boolean,
+    startDate: Date,
+    logsModel: Model<Logs>,
+    chillerModel: Model<Chiller>,
+  ) {
+    const avgEnergyCost = this.getAverageEnergyCostForRange(logRecords);
+    console.log("✌️avgEnergyCost --->", avgEnergyCost);
+    const averages = this.getAveragesForRange(logRecords, useRunHours);
+    console.log("✌️averages --->", averages);
+
+    // const chiller = { isMetric: false, isSteam: false }; // Replace with actual chiller object
+    const chiller = await chillerModel.findOne({
+      _id: new mongoose.Types.ObjectId(logRecords[0].chillerId),
+    });
+    // console.log('✌️chiller --->', chiller);
+
+    const performance: any = {
+      avgLoss: averages.avgLoss,
+      avgOtherLoss: averages.avgOtherLoss,
+      avgExcessCondApp: averages.avgExcessCondApp,
+      avgExcessEvapApp: averages.avgExcessEvapApp,
+      targetCost: await this.getTargetCostForRange(
+        chiller,
+        logRecords,
+        useRunHours,
+        startDate,
+        logsModel,
+      ),
+    };
+
+    const targetCost = await performance.targetCost;
+
+    performance.lossCost = performance.avgLoss * targetCost * 0.01;
+    performance.actualCost = targetCost + performance.lossCost;
+
+    if (chiller.unit != MEASUREMENT_UNITS.SIMetric && avgEnergyCost !== 0) {
+      performance.kwhLoss = performance.lossCost / avgEnergyCost;
+      performance.BTULoss = performance.kwhLoss * 3412.12;
+      performance.CO2 = (performance.kwhLoss * chiller?.emissionFactor) / 2000;
+    } else {
+      performance.kwhLoss = 0;
+      performance.BTULoss = 0;
+      performance.CO2 = 0;
+    }
+
+    return performance;
+  }
+
+  static getAverageEnergyCostForRange(logRecords: any[]): number {
+    if (!logRecords.length) return 0;
+    const sum = logRecords.reduce((acc, r) => acc + (r.energyCost || 0), 0);
+    return sum / logRecords.length;
+  }
+
+  // static getAveragesForRange(logRecords: any[], useRunHours: boolean) {
+  //   let totalLoss = 0,
+  //     totalOtherLoss = 0,
+  //     totalExcessCondApp = 0,
+  //     totalExcessEvapApp = 0;
+
+  //   if (!logRecords || logRecords.length === 0) {
+  //     return {
+  //       avgLoss: 0,
+  //       avgOtherLoss: 0,
+  //       avgExcessCondApp: 0,
+  //       avgExcessEvapApp: 0,
+  //     };
+  //   }
+
+  //   if (logRecords.length === 1) {
+  //     return {
+  //       avgLoss: logRecords[0].totalLoss,
+  //       avgOtherLoss:
+  //         logRecords[0].condInletLoss +
+  //         logRecords[0].deltaLoss +
+  //         logRecords[0].evapTempLoss,
+  //       avgExcessCondApp: logRecords[0].condAppVariance,
+  //       avgExcessEvapApp: logRecords[0].evapAppVariance,
+  //     };
+  //   }
+
+  //   for (let idx = 0; idx < logRecords.length - 1; idx++) {
+  //     const current = logRecords[idx];
+  //     const next = logRecords[idx + 1];
+
+  //     let intervalBetweenReadings;
+  //     console.log('✌️current?.runHours --->', current?.runHours);
+  //     console.log('✌️next?.runHours --->', next?.runHours);
+  //     if (useRunHours) {
+  //       intervalBetweenReadings = Math.abs(
+  //         // logRecords[idx + 1].runHours - logRecords[idx].runHours
+  //         (next?.runHours ?? 0) - (current?.runHours ?? 0)
+  //       );
+  //     } else {
+  //       intervalBetweenReadings = Math.abs(
+  //         differenceInHours(
+  //           // logRecords[idx + 1].readingDateUTC,
+  //           // logRecords[idx].readingDateUTC
+  //           new Date(next?.readingDateUTC),
+  //           new Date(current?.readingDateUTC)
+  //         )
+  //       );
+  //     }
+
+  //     console.log('✌️intervalBetweenReadings --->', intervalBetweenReadings);
+  //     if (intervalBetweenReadings === 0) continue;
+
+  //     // const lossVals = [
+  //     //   logRecords[idx].totalLoss,
+  //     //   logRecords[idx + 1].totalLoss,
+  //     // ].sort();
+  //     const lossVals = [current?.totalLoss || 0, next?.totalLoss || 0].sort();
+  //     totalLoss +=
+  //       this.trapezoidArea(lossVals, intervalBetweenReadings) /
+  //       intervalBetweenReadings;
+
+  //     // const otherLossVals = [
+  //     //   logRecords[idx].deltaLoss +
+  //     //     logRecords[idx].evapTempLoss +
+  //     //     logRecords[idx].condInletLoss,
+  //     //   logRecords[idx + 1].deltaLoss +
+  //     //     logRecords[idx + 1].evapTempLoss +
+  //     //     logRecords[idx + 1].condInletLoss,
+  //     // ].sort();
+  //     const otherLossVals = [
+  //       (current?.deltaLoss || 0) +
+  //         (current?.evapTempLoss || 0) +
+  //         (current?.condInletLoss || 0),
+  //       (next?.deltaLoss || 0) +
+  //         (next?.evapTempLoss || 0) +
+  //         (next?.condInletLoss || 0),
+  //     ].sort();
+  //     totalOtherLoss +=
+  //       this.trapezoidArea(otherLossVals, intervalBetweenReadings) /
+  //       intervalBetweenReadings;
+
+  //     // const condAppVals = [
+  //     //   logRecords[idx].condAppVariance,
+  //     //   logRecords[idx + 1].condAppVariance,
+  //     // ].sort();
+  //     const condAppVals = [
+  //       current?.condAppVariance || 0,
+  //       next?.condAppVariance || 0,
+  //     ].sort();
+  //     totalExcessCondApp +=
+  //       this.trapezoidArea(condAppVals, intervalBetweenReadings) /
+  //       intervalBetweenReadings;
+
+  //     // const evapAppVals = [
+  //     //   logRecords[idx].evapAppVariance,
+  //     //   logRecords[idx + 1].evapAppVariance,
+  //     // ].sort();
+  //     const evapAppVals = [
+  //       current?.evapAppVariance || 0,
+  //       next?.evapAppVariance || 0,
+  //     ].sort();
+  //     totalExcessEvapApp +=
+  //       this.trapezoidArea(evapAppVals, intervalBetweenReadings) /
+  //       intervalBetweenReadings;
+  //   }
+
+  //   const divisor = logRecords.length - 1;
+  //   return {
+  //     avgLoss: totalLoss / divisor,
+  //     avgOtherLoss: totalOtherLoss / divisor,
+  //     avgExcessCondApp: totalExcessCondApp / divisor,
+  //     avgExcessEvapApp: totalExcessEvapApp / divisor,
+  //   };
+  // }
+
+  static getAveragesForRange(logRecords: any[], useRunHours: boolean) {
+    let totalLoss = 0;
+    let totalOtherLoss = 0;
+    let totalExcessCondApp = 0;
+    let totalExcessEvapApp = 0;
+
+    if (!logRecords || logRecords.length === 0) {
+      return {
+        avgLoss: 0,
+        avgOtherLoss: 0,
+        avgExcessCondApp: 0,
+        avgExcessEvapApp: 0,
+      };
+    }
+
+    if (logRecords.length === 1) {
+      const r = logRecords[0];
+      return {
+        avgLoss: r.totalLoss ?? 0,
+        avgOtherLoss:
+          (r.condInletLoss ?? 0) + (r.deltaLoss ?? 0) + (r.evapTempLoss ?? 0),
+        avgExcessCondApp: r.condAppVariance ?? 0,
+        avgExcessEvapApp: r.evapAppVariance ?? 0,
+      };
+    }
+
+    const intervals = logRecords.length - 1;
+
+    for (let idx = 0; idx < logRecords.length - 1; idx++) {
+      const current = logRecords[idx];
+      const next = logRecords[idx + 1];
+
+      let intervalBetweenReadings = 1;
+
+      if (useRunHours) {
+        intervalBetweenReadings = Math.abs(
+          (next?.runHours ?? 0) - (current?.runHours ?? 0),
+        );
+      } else {
+        const dCurr = dayjs(current?.readingDateUTC);
+        const dNext = dayjs(next?.readingDateUTC);
+
+        intervalBetweenReadings = Math.abs(dNext.diff(dCurr, "hour"));
+
+        // ✅ ColdFusion safeguard: if still 0, treat as 1
+        if (intervalBetweenReadings === 0) {
+          intervalBetweenReadings = 1;
+        }
+      }
+
+      // --- avg total loss ---
+      const a = current?.totalLoss ?? 0;
+      const b = next?.totalLoss ?? 0;
+      const avgLossForInterval = (Math.min(a, b) + Math.max(a, b)) / 2;
+      totalLoss += avgLossForInterval;
+
+      // --- avg other loss ---
+      const currentOther =
+        (current?.deltaLoss ?? 0) +
+        (current?.evapTempLoss ?? 0) +
+        (current?.condInletLoss ?? 0);
+      const nextOther =
+        (next?.deltaLoss ?? 0) +
+        (next?.evapTempLoss ?? 0) +
+        (next?.condInletLoss ?? 0);
+      const avgOtherForInterval =
+        (Math.min(currentOther, nextOther) +
+          Math.max(currentOther, nextOther)) /
+        2;
+      totalOtherLoss += avgOtherForInterval;
+
+      // --- avg cond variance ---
+      const avgCondForInterval =
+        (Math.min(current?.condAppVariance ?? 0, next?.condAppVariance ?? 0) +
+          Math.max(current?.condAppVariance ?? 0, next?.condAppVariance ?? 0)) /
+        2;
+      totalExcessCondApp += avgCondForInterval;
+
+      // --- avg evap variance ---
+      const avgEvapForInterval =
+        (Math.min(current?.evapAppVariance ?? 0, next?.evapAppVariance ?? 0) +
+          Math.max(current?.evapAppVariance ?? 0, next?.evapAppVariance ?? 0)) /
+        2;
+      totalExcessEvapApp += avgEvapForInterval;
+    }
+
+    return {
+      avgLoss: intervals > 0 ? totalLoss / intervals : 0,
+      avgOtherLoss: intervals > 0 ? totalOtherLoss / intervals : 0,
+      avgExcessCondApp: intervals > 0 ? totalExcessCondApp / intervals : 0,
+      avgExcessEvapApp: intervals > 0 ? totalExcessEvapApp / intervals : 0,
+    };
+  }
+
+  static trapezoidArea(vals: number[], interval: number) {
+    const [lesserY, greaterY] = vals;
+    const rectArea = interval * lesserY;
+    const triangleArea = (interval * (greaterY - lesserY)) / 2;
+    return rectArea + triangleArea;
+  }
+
+  static async getTargetCostForRange(
+    chiller: any, // object with getChillerID(), getHoursPerWeek(), getWeeksPerYear()
+    logRecords: any[], // array of log entries with ReadingDate
+    useRunHours: boolean,
+    startDate: Date,
+    logsModel: Model<Logs>,
+  ): Promise<number> {
+    let avgEnergyCost = 0;
+    let hourlyTargetCost = 0;
+    let targetCost = 0;
+    let daysInRange = 0;
+    let runHours = 0;
+
+    // Equivalent to CF getAverageEnergyCostForRange
+    avgEnergyCost = this.getAverageEnergyCostForRange(logRecords);
+
+    // Equivalent to variables.logCalc.getTargetCostPerHour
+    hourlyTargetCost = this.getTargetCostPerHour(chiller, avgEnergyCost);
+
+    if (useRunHours) {
+      runHours = await this.getRunHoursForRange(
+        logRecords,
+        chiller._id,
+        startDate,
+        logsModel,
+      );
+      targetCost = runHours * hourlyTargetCost;
+    }
+
+    if (!useRunHours || runHours === 0) {
+      if (!logRecords.length) return 0;
+
+      // logRecords[0] is CF's logRecords.ReadingDate[1]
+      daysInRange = Math.abs(
+        differenceInCalendarDays(
+          new Date(logRecords[0].readingDateUTC),
+          startDate,
+        ),
+      );
+
+      targetCost =
+        hourlyTargetCost *
+        chiller.weeklyHours *
+        chiller.weeksPerYear *
+        (daysInRange / 365);
+    }
+
+    return targetCost;
+  }
+
+  /**
+   * Calculate the target cost per hour for a chiller
+   */
+  static getTargetCostPerHour(chiller: any, energyCost = 0): number {
+    let targetCost = 0;
+
+    if (energyCost) {
+      if (chiller.unit == MEASUREMENT_UNITS.SIMetric) {
+        targetCost =
+          (1 / chiller.efficiencyRating) *
+          energyCost *
+          chiller.tons *
+          chiller.avgLoadProfile *
+          0.01;
+      } else {
+        targetCost =
+          chiller.efficiencyRating *
+          energyCost *
+          chiller.tons *
+          chiller.avgLoadProfile *
+          0.01;
+      }
+    } else {
+      if (chiller.unit == MEASUREMENT_UNITS.SIMetric) {
+        targetCost =
+          (1 / chiller.efficiencyRating) *
+          chiller.energyCost *
+          chiller.tons *
+          chiller.avgLoadProfile *
+          0.01;
+      } else {
+        targetCost =
+          chiller.efficiencyRating *
+          chiller.energyCost *
+          chiller.tons *
+          chiller.avgLoadProfile *
+          0.01;
+      }
+    }
+
+    return targetCost;
+  }
+
+  /**
+   * Get Purge Time Summary for a given Chiller
+   */
+  static async getPurgeTimeSummaryForChiller(
+    chillerId: number,
+    logsModel: Model<Logs>,
+  ) {
+    const purgeTimeSummary: { "7DayAvg": number; "30DayAvg": number } = {
+      "7DayAvg": 0,
+      "30DayAvg": 0,
+    };
+
+    const mostRecentPurgeRecord = await this.getLastPurgeTimeBeforeDate(
+      chillerId,
+      new Date(),
+      logsModel,
+    );
+    // console.log("✌️mostRecentPurgeRecord --->", mostRecentPurgeRecord);
+
+    if (mostRecentPurgeRecord?.purgeTimeMin > 0) {
+      // --- 7 Day Average
+      const weekComparisonRecord = await this.getPurgeComparisonRecord(
+        chillerId,
+        new Date(mostRecentPurgeRecord.readingDateUTC),
+        7,
+        2,
+        logsModel,
+      );
+
+      if (weekComparisonRecord?.purgeTimeMin > 0) {
+        const formattedMostRecentPurgeRecord = {
+          ...mostRecentPurgeRecord,
+          readingDateUTC: new Date(mostRecentPurgeRecord.readingDateUTC),
+        };
+
+        purgeTimeSummary["7DayAvg"] = this.getPurgeTimeAverage(
+          weekComparisonRecord,
+          formattedMostRecentPurgeRecord,
+        );
+      }
+
+      // --- 30 Day Average
+      const monthComparisonRecord = await this.getPurgeComparisonRecord(
+        chillerId,
+        new Date(mostRecentPurgeRecord.readingDateUTC),
+        30,
+        10,
+        logsModel,
+      );
+
+      if (monthComparisonRecord?.purgeTimeMin > 0) {
+        const formattedMostRecentPurgeRecord = {
+          ...mostRecentPurgeRecord,
+          readingDateUTC: new Date(mostRecentPurgeRecord.readingDateUTC),
+        };
+        purgeTimeSummary["30DayAvg"] = this.getPurgeTimeAverage(
+          monthComparisonRecord,
+          formattedMostRecentPurgeRecord,
+        );
+      }
+    }
+
+    return purgeTimeSummary;
+  }
+
+  /**
+   * Get last purge time before marker date
+   */
+  static async getLastPurgeTimeBeforeDate(
+    chillerId: number,
+    markerDate: Date,
+    logsModel: Model<Logs>,
+  ) {
+    const record = await logsModel
+      .findOne({
+        chillerId: chillerId,
+        purgeTimeMin: { $gt: 0 },
+        readingDateUTC: { $lte: markerDate },
+      })
+      .sort({ readingDateUTC: -1 })
+      .select("readingDateUTC purgeTimeMin")
+      .lean();
+
+    return (
+      record || {
+        readingDateUTC: new Date(),
+        purgeTimeMin: 0,
+      }
+    );
+  }
+
+  /**
+   * Get purge comparison record around a time window
+   */
+  static async getPurgeComparisonRecord(
+    chillerId: number,
+    mostRecentDate: Date,
+    daysBack: number,
+    variance: number,
+    logsModel: Model<Logs>,
+  ) {
+    const medianDate = new Date(mostRecentDate);
+    medianDate.setDate(medianDate.getDate() - daysBack);
+
+    const startDate = new Date(mostRecentDate);
+    startDate.setDate(startDate.getDate() - (daysBack + variance));
+
+    const endDate = new Date(mostRecentDate);
+    endDate.setDate(endDate.getDate() - (daysBack - variance));
+
+    const purgeRecords = await this.getPurgeRecordsInRange(
+      chillerId,
+      startDate,
+      endDate,
+      logsModel,
+    );
+
+    let purgeComparisonRecord = {
+      readingDateUTC: new Date(),
+      purgeTimeMin: 0,
+    };
+
+    if (purgeRecords.length > 0) {
+      let stop = false;
+
+      for (let i = 0; i <= variance; i++) {
+        if (stop) break;
+
+        for (const rec of purgeRecords) {
+          const dateDiffDays = Math.abs(
+            Math.floor(
+              (new Date(rec.readingDateUTC).getTime() - medianDate.getTime()) /
+                (1000 * 60 * 60 * 24),
+            ),
+          );
+
+          if (dateDiffDays <= i) {
+            purgeComparisonRecord = {
+              readingDateUTC: new Date(rec.readingDateUTC),
+              purgeTimeMin: rec.purgeTimeMin,
+            };
+            stop = true;
+            break;
+          }
+        }
+      }
+    }
+
+    return purgeComparisonRecord;
+  }
+
+  /**
+   * Get purge records in a date range
+   */
+  static async getPurgeRecordsInRange(
+    chillerId: number,
+    startDate: Date,
+    endDate: Date,
+    logsModel: Model<Logs>,
+  ) {
+    return logsModel
+      .find({
+        chillerId: chillerId,
+        readingDateUTC: { $gte: startDate, $lte: endDate },
+        purgeTimeMin: { $gt: 0 },
+      })
+      .sort({ readingDateUTC: -1 })
+      .select("readingDateUTC purgeTimeMin")
+      .lean();
+  }
+
+  /**
+   * Calculate purge time average
+   */
+  static getPurgeTimeAverage(
+    startStruct: { purgeTimeMin: number; readingDateUTC: Date },
+    recentStruct: { purgeTimeMin: number; readingDateUTC: Date },
+  ): number {
+    const purgeTimeDiff = recentStruct.purgeTimeMin - startStruct.purgeTimeMin;
+
+    const hourDiff =
+      (recentStruct.readingDateUTC.getTime() -
+        startStruct.readingDateUTC.getTime()) /
+      (1000 * 60 * 60);
+
+    if (hourDiff <= 0) return 0;
+
+    return Math.round((purgeTimeDiff / hourDiff) * 24);
+  }
+
+  /**
+   * Get Approach Alerts (condApproach & evapApproach variances >= 2 in last 7 days)
+   */
+  static async getApproachAlerts(
+    chillerList: any[],
+    logsModel: Model<Logs>,
+  ): Promise<{
+    condAlerts: any[];
+    evapAlerts: any[];
+  }> {
+    if (!chillerList || chillerList.length === 0) {
+      return { condAlerts: [], evapAlerts: [] };
+    }
+
+    const sevenDaysAgoUTC = new Date();
+    sevenDaysAgoUTC.setUTCDate(sevenDaysAgoUTC.getUTCDate() - 30);
+    console.log("✌️sevenDaysAgoUTC --->", sevenDaysAgoUTC);
+
+    const chillerIds = chillerList.map((c) =>
+      typeof c._id === "string" ? new mongoose.Types.ObjectId(c._id) : c._id,
+    );
+    console.log("✌️chillerIds --->", chillerIds);
+
+    // Step 1: Get alerts from MongoDB (similar to the SQL query)
+    const alerts = await logsModel.aggregate([
+      {
+        $addFields: {
+          readingDateUTC: { $toDate: "$readingDateUTC" },
+        },
+      },
+      {
+        $match: {
+          chillerId: {
+            $in: chillerIds,
+          },
+          $or: [
+            { condAppVariance: { $gte: 2 } },
+            { evapAppVariance: { $gte: 2 } },
+          ],
+          readingDateUTC: {
+            $gte: sevenDaysAgoUTC,
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: TABLE_NAMES.CHILLER,
+          localField: "chillerId",
+          foreignField: "_id",
+          as: "chiller",
+        },
+      },
+      { $unwind: "$chiller" },
+      {
+        $lookup: {
+          from: TABLE_NAMES.FACILITY,
+          localField: "chiller.facilityId",
+          foreignField: "_id",
+          as: "facility",
+        },
+      },
+      { $unwind: "$facility" },
+      {
+        $project: {
+          logId: "$_id",
+          condAppVariance: 1,
+          evapAppVariance: 1,
+          evapApproach: 1,
+          calculatedEvapRefrigTemp: 1,
+          condApproach: 1,
+          calculatedCondRefrigTemp: 1,
+          actualLoad: 1,
+          readingDate: 1,
+          readingDateUTC: 1,
+          chillerId: 1,
+          facilityName: "$facility.name",
+          ChillerNo: "$chiller.ChillerNo",
+          ChillerNumber: "$chiller.ChillerNumber",
+        },
+      },
+      {
+        $sort: {
+          facilityName: 1,
+          chillerId: 1,
+          ChillerNo: 1,
+          ChillerNumber: 1,
+          condAppVariance: -1,
+          evapAppVariance: -1,
+        },
+      },
+    ]);
+    console.log("✌️alerts --->", alerts);
+
+    // Step 2: Process alerts similar to CF loops
+    const finalAlerts = { condAlerts: [], evapAlerts: [] };
+
+    const grouped = alerts.reduce(
+      (acc, a) => {
+        (acc[a.chillerId] = acc[a.chillerId] || []).push(a);
+        return acc;
+      },
+      {} as Record<string, any[]>,
+    );
+    console.log("✌️grouped --->", grouped);
+
+    for (const chillerId of Object.keys(grouped)) {
+      const chillerAlerts = grouped[chillerId];
+
+      let condAlert = null;
+      let evapAlert = null;
+
+      for (const alert of chillerAlerts) {
+        // Initialize condAlert & evapAlert
+        if (!condAlert) condAlert = { ...alert };
+        if (!evapAlert) evapAlert = { ...alert };
+
+        // Update condAlert if stronger variance
+        if (
+          alert.condAppVariance > condAlert.condAppVariance &&
+          alert.condAppVariance >= 2
+        ) {
+          condAlert = { ...alert };
+        }
+
+        // Update evapAlert if stronger variance
+        if (
+          alert.evapAppVariance > evapAlert.evapAppVariance &&
+          alert.evapAppVariance >= 2
+        ) {
+          evapAlert = { ...alert };
+        }
+      }
+
+      if (condAlert?.condAppVariance >= 2) {
+        finalAlerts.condAlerts.push(condAlert);
+      }
+      if (evapAlert?.evapAppVariance >= 2) {
+        finalAlerts.evapAlerts.push(evapAlert);
+      }
+    }
+
+    return finalAlerts;
+  }
+
+  static async createHistPerformanceSummaryForCompany(
+    companyId: string,
+    year: number,
+    quarter = 0,
+    month = 0,
+    chillerModel: Model<Chiller>,
+    logsModel: Model<Logs>,
+    histChillerModel: Model<HistChillerPerformance>,
+    histCompanyPerformanceModel: Model<HistCompanyPerformance>,
+    histFacilityPerformanceModel: Model<HistFacilityPerformance>,
+  ): Promise<void> {
+    const companyChillers = await this.getCompanyChillers(
+      companyId,
+      chillerModel,
+    );
+
+    const allFacilityIds = [];
+    companyChillers.map((c) => {
+      allFacilityIds.push(c.facilityId);
+    });
+
+    const locationIdList = this.removeDuplicateFacilityIds(allFacilityIds);
+
+    let companySuccess = false;
+
+    const perfSummary: any = {
+      averageLoss: 0,
+      targetCost: 0,
+      lossCost: 0,
+      actualCost: 0,
+      kwhLoss: 0,
+      btuLoss: 0,
+      co2: 0,
+      avgExcessCondApp: 0,
+      avgExcessEvapApp: 0,
+      avgOtherLoss: 0,
+    };
+
+    if (locationIdList.length > 0) {
+      let tempLossTotal = 0;
+      let tempExcessCondAppTotal = 0;
+      let tempExcessEvapAppTotal = 0;
+      let tempOtherLossTotal = 0;
+
+      for (const locId of locationIdList) {
+        const locationSuccess =
+          await this.createHistPerformanceSummaryForLocation(
+            locId,
+            year,
+            quarter,
+            month,
+            chillerModel,
+            logsModel,
+            histChillerModel,
+            histFacilityPerformanceModel,
+            histChillerModel,
+          );
+
+        if (locationSuccess) {
+          companySuccess = true;
+          const locPerfSummary =
+            await this.retrieveHistPerformanceSummaryForLocation(
+              locId,
+              year,
+              quarter,
+              month,
+              histFacilityPerformanceModel,
+            );
+
+          tempLossTotal += locPerfSummary.averageLoss;
+          tempOtherLossTotal += locPerfSummary.avgOtherLoss;
+          tempExcessCondAppTotal += locPerfSummary.avgExcessCondApp;
+          tempExcessEvapAppTotal += locPerfSummary.avgExcessEvapApp;
+
+          perfSummary.targetCost += locPerfSummary.targetCost;
+          perfSummary.lossCost += locPerfSummary.lossCost;
+          perfSummary.actualCost += locPerfSummary.actualCost;
+          perfSummary.kwhLoss += locPerfSummary.kwhLoss;
+          perfSummary.btuLoss += locPerfSummary.btuLoss;
+          perfSummary.co2 += locPerfSummary.co2;
+
+          perfSummary.averageLoss = tempLossTotal / locationIdList.length;
+          perfSummary.avgExcessCondApp =
+            tempExcessCondAppTotal / locationIdList.length;
+          perfSummary.avgExcessEvapApp =
+            tempExcessEvapAppTotal / locationIdList.length;
+          perfSummary.avgOtherLoss = tempOtherLossTotal / locationIdList.length;
+        }
+      }
+
+      if (companySuccess) {
+        await this.saveHistCompanyPerfSummary(
+          companyId,
+          year,
+          quarter,
+          month,
+          perfSummary,
+          histCompanyPerformanceModel,
+        );
+      }
+    }
+  }
+
+  /** === Equivalent of getCompanyChillers === */
+  static async getCompanyChillers(
+    companyId: string,
+    chillerModel: Model<Chiller>,
+  ) {
+    return chillerModel
+      .find({
+        status: ChillerStatus.Active,
+        companyId: new mongoose.Types.ObjectId(companyId),
+      })
+      .populate({
+        path: "facilityId",
+        match: {
+          companyId: new mongoose.Types.ObjectId(companyId),
+          isActive: true,
+        },
+      })
+      .sort({ facilityId: 1, _id: 1 })
+      .exec();
+  }
+
+  /** === Equivalent of createHistPerformanceSummaryForLocation === */
+  static async createHistPerformanceSummaryForLocation(
+    locationId: string,
+    year: number,
+    quarter = 0,
+    month = 0,
+    chillerModel: Model<Chiller>,
+    logsModel: Model<Logs>,
+    histChillerModel: Model<HistChillerPerformance>,
+    histFacilityPerformanceModel: Model<HistFacilityPerformance>,
+    histChillerPerformanceModel: Model<HistChillerPerformance>,
+  ): Promise<boolean> {
+    const locChillers = await this.getLocationChillers(
+      locationId,
+      chillerModel,
+    );
+    if (!locChillers.length) return false;
+
+    const chillerList = locChillers.map((c) => c._id.toString());
+    let locationSuccess = false;
+
+    const perfSummary: any = {
+      avgLoss: 0,
+      targetCost: 0,
+      lossCost: 0,
+      actualCost: 0,
+      kwhLoss: 0,
+      btuLoss: 0,
+      co2: 0,
+      avgExcessCondApp: 0,
+      avgExcessEvapApp: 0,
+      avgOtherLoss: 0,
+    };
+
+    let tempLossTotal = 0,
+      tempOtherLossTotal = 0,
+      tempExcessCondAppTotal = 0,
+      tempExcessEvapAppTotal = 0;
+
+    for (const chillerId of chillerList) {
+      const chillerSuccess = await this.createHistPerformanceSummaryForChiller(
+        chillerId,
+        year,
+        quarter,
+        month,
+        logsModel,
+        chillerModel,
+        histChillerModel,
+      );
+
+      if (chillerSuccess) {
+        locationSuccess = true;
+        const chillerPerfSummary =
+          await this.retrieveHistPerformanceSummaryForChiller(
+            chillerId,
+            year,
+            quarter,
+            month,
+            histChillerPerformanceModel,
+          );
+
+        tempLossTotal += chillerPerfSummary.averageLoss;
+        tempOtherLossTotal += chillerPerfSummary.avgOtherLoss;
+        tempExcessCondAppTotal += chillerPerfSummary.avgExcessCondApp;
+        tempExcessEvapAppTotal += chillerPerfSummary.avgExcessEvapApp;
+
+        perfSummary.targetCost += chillerPerfSummary.targetCost;
+        perfSummary.lossCost += chillerPerfSummary.lossCost;
+        perfSummary.actualCost += chillerPerfSummary.actualCost;
+        perfSummary.kwhLoss += chillerPerfSummary.kwhLoss;
+        perfSummary.btuLoss += chillerPerfSummary.btuLoss;
+        perfSummary.co2 += chillerPerfSummary.co2;
+
+        perfSummary.avgLoss = tempLossTotal / chillerList.length;
+        perfSummary.avgExcessCondApp =
+          tempExcessCondAppTotal / chillerList.length;
+        perfSummary.avgExcessEvapApp =
+          tempExcessEvapAppTotal / chillerList.length;
+        perfSummary.avgOtherLoss = tempOtherLossTotal / chillerList.length;
+      }
+    }
+
+    if (locationSuccess) {
+      await this.saveHistLocationPerfSummary(
+        locationId,
+        year,
+        quarter,
+        month,
+        perfSummary,
+        histFacilityPerformanceModel,
+      );
+    }
+
+    return locationSuccess;
+  }
+
+  /** === Equivalent of getLocationChillers === */
+  static async getLocationChillers(
+    locationId: string,
+    chillerModel: Model<Chiller>,
+  ) {
+    return chillerModel
+      .find({
+        facilityId: new mongoose.Types.ObjectId(locationId),
+        status: ChillerStatus.Active,
+      })
+      .exec();
+  }
+
+  /** === Equivalent of createHistPerformanceSummaryForChiller === */
+  static async createHistPerformanceSummaryForChiller(
+    chillerId: string,
+    year: number,
+    quarter = 0,
+    month = 0,
+    logsModel: Model<Logs>,
+    chillerModel: Model<Chiller>,
+    histChillerModel: Model<HistChillerPerformance>,
+  ): Promise<boolean> {
+    const dateRange = this.buildDateRange(year, quarter, month);
+    const logRecords = await this.getLogRecordsInRange(
+      dateRange.startDate,
+      dateRange.endDate,
+      chillerId,
+      logsModel,
+    );
+    console.log("✌️logRecords --->", logRecords);
+
+    if (!logRecords.length) return false;
+
+    let useRunHours = true;
+    const chiller = await chillerModel.findById(chillerId).exec();
+
+    if (!chiller.useRunHours) {
+      useRunHours = false;
+    } else {
+      useRunHours = this.checkRunHoursForRange(logRecords);
+    }
+    console.log("✌️useRunHours --->", useRunHours);
+
+    const perfSummary = await this.getPerformanceForRange(
+      logRecords,
+      useRunHours,
+      dateRange.startDate,
+      logsModel,
+      chillerModel,
+    );
+
+    await this.saveHistPerformanceSummary(
+      chillerId,
+      year,
+      quarter,
+      month,
+      perfSummary,
+      histChillerModel,
+    );
+
+    return true;
+  }
+
+  /** === Equivalent of saveHistPerformanceSummary === */
+  static async saveHistPerformanceSummary(
+    chillerId: string,
+    year: number,
+    quarter: number,
+    month: number,
+    perfSummary: any,
+    histChillerModel: Model<HistChillerPerformance>,
+  ) {
+    await histChillerModel.create({
+      chillerId,
+      year,
+      quarter,
+      month,
+      ...perfSummary,
+    });
+  }
+
+  static async saveHistLocationPerfSummary(
+    locationId: string,
+    year: number,
+    quarter: number,
+    month: number,
+    perfSummary: any,
+    histFacilityPerformanceModel: Model<HistFacilityPerformance>,
+  ) {
+    await histFacilityPerformanceModel.create({
+      locationId,
+      year,
+      quarter,
+      month,
+      ...perfSummary,
+    });
+  }
+
+  static async saveHistCompanyPerfSummary(
+    companyId: string,
+    year: number,
+    quarter: number,
+    month: number,
+    perfSummary: any,
+    histCompanyPerformanceModel: Model<HistCompanyPerformance>,
+  ) {
+    await histCompanyPerformanceModel.create({
+      companyId,
+      year,
+      quarter,
+      month,
+      ...perfSummary,
+    });
+  }
+
+  /** === Retrieval equivalent of retrieveHistPerformanceSummaryForLocation === */
+  static async retrieveHistPerformanceSummaryForLocation(
+    locationId: string,
+    year: number,
+    quarter: number,
+    month: number,
+    histFacilityPerformanceModel: Model<HistFacilityPerformance>,
+  ) {
+    return histFacilityPerformanceModel
+      .findOne({ locationId, year, quarter, month })
+      .sort({ _id: -1 })
+      .lean()
+      .exec();
+  }
+
+  static async retrieveHistPerformanceSummaryForChiller(
+    chillerId: string,
+    year: number,
+    quarter: number,
+    month: number,
+    histChillerPerformanceModel: Model<HistChillerPerformance>,
+  ) {
+    return histChillerPerformanceModel
+      .findOne({ chillerId, year, quarter, month })
+      .sort({ _id: -1 })
+      .lean()
+      .exec();
+  }
+
+  static removeDuplicateFacilityIds<T extends string | number>(
+    facilityIds: T[],
+  ): T[] {
+    if (!facilityIds || facilityIds.length === 0) return [];
+
+    const seen = new Set<string>();
+    const result: T[] = [];
+
+    for (const id of facilityIds) {
+      const key = id.toString(); // works for ObjectId, string, number
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(id);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Build a date range based on year, quarter, and month
+   * - quarter = 0 → full year
+   * - month = 0 → full quarter
+   */
+  static buildDateRange(
+    year: number,
+    quarter = 0,
+    month = 0,
+  ): { startDate: Date; endDate: Date } {
+    const startDay = 1;
+    let startMonth = 1;
+    let endDay = 31;
+    let endMonth = 12;
+
+    // Default start/end time (like ColdFusion)
+    const startHour = 0;
+    const startMinute = 0;
+    const startSecond = 0;
+    const endHour = 0;
+    const endMinute = 0;
+    const endSecond = 0;
+
+    const isLeapYear = (y: number): boolean =>
+      (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+
+    switch (quarter) {
+      case 1:
+        switch (month) {
+          case 0:
+            endMonth = 3;
+            break;
+          case 1:
+            endMonth = 1;
+            break;
+          case 2:
+            startMonth = 2;
+            endMonth = 2;
+            endDay = isLeapYear(year) ? 29 : 28;
+            break;
+          case 3:
+            startMonth = 3;
+            endMonth = 3;
+            break;
+        }
+        break;
+
+      case 2:
+        switch (month) {
+          case 0:
+            startMonth = 4;
+            endMonth = 6;
+            endDay = 30;
+            break;
+          case 4:
+            startMonth = 4;
+            endMonth = 4;
+            endDay = 30;
+            break;
+          case 5:
+            startMonth = 5;
+            endMonth = 5;
+            break;
+          case 6:
+            startMonth = 6;
+            endMonth = 6;
+            endDay = 30;
+            break;
+        }
+        break;
+
+      case 3:
+        switch (month) {
+          case 0:
+            startMonth = 7;
+            endMonth = 9;
+            endDay = 30;
+            break;
+          case 7:
+            startMonth = 7;
+            endMonth = 7;
+            break;
+          case 8:
+            startMonth = 8;
+            endMonth = 8;
+            break;
+          case 9:
+            startMonth = 9;
+            endMonth = 9;
+            endDay = 30;
+            break;
+        }
+        break;
+
+      case 4:
+        switch (month) {
+          case 0:
+            startMonth = 10;
+            endMonth = 12;
+            break;
+          case 10:
+            startMonth = 10;
+            endMonth = 10;
+            break;
+          case 11:
+            startMonth = 11;
+            endMonth = 11;
+            endDay = 30;
+            break;
+          case 12:
+            startMonth = 12;
+            endMonth = 12;
+            break;
+        }
+        break;
+    }
+
+    const startDate = new Date(
+      year,
+      startMonth - 1, // JS months are 0-based
+      startDay,
+      startHour,
+      startMinute,
+      startSecond,
+    );
+
+    const endDate = new Date(
+      year,
+      endMonth - 1,
+      endDay,
+      endHour,
+      endMinute,
+      endSecond,
+    );
+
+    return { startDate, endDate };
+  }
+
+  // static getFixedRanges(
+  //   today: Date = new Date(),
+  // ): Record<string, { startDate: Date; endDate: Date }> {
+  //   const year = today.getFullYear();
+
+  //   return {
+  //     thisYTD: {
+  //       startDate: new Date(year, 0, 1, 0, 0, 0),
+  //       endDate: today,
+  //     },
+  //     lastYTD: {
+  //       startDate: new Date(year - 1, 0, 1, 0, 0, 0),
+  //       // endDate: today,
+  //       endDate: new Date(
+  //         year - 1,
+  //         today.getMonth(),
+  //         today.getDate(),
+  //         23,
+  //         59,
+  //         59,
+  //       ),
+  //     },
+  //     last12Months: {
+  //       startDate: new Date(year - 1, 0, 1, 0, 0, 0),
+  //       endDate: new Date(year - 1, 11, 31, 23, 59, 59),
+  //     },
+  //     [String(year - 2)]: {
+  //       startDate: new Date(year - 2, 0, 1, 0, 0, 0),
+  //       endDate: new Date(year - 2, 11, 31, 23, 59, 59),
+  //     },
+  //     [String(year - 3)]: {
+  //       startDate: new Date(year - 3, 0, 1, 0, 0, 0),
+  //       endDate: new Date(year - 3, 11, 31, 23, 59, 59),
+  //     },
+  //   };
+  // }
+  static getFixedRanges(
+    today: Date = new Date(),
+  ): Record<string, { startDate: Date; endDate: Date }> {
+    const year = today.getFullYear();
+    const rangeTypes = [1, 2, 3]; // rangeTypes array as provided
+
+    const results: any = {};
+
+    for (const rangeType of rangeTypes) {
+      let startDate: Date;
+      let endDate: Date;
+
+      if (rangeType === 1) {
+        console.log("✌️rangeType === 1 --->");
+        // This YTD → Jan 1 current year → today
+        startDate = new Date(year, 0, 1); // Jan 1 current year
+        endDate = today; // today
+        console.log("✌️startDate --->", startDate);
+        console.log("✌️endDate --->", endDate);
+      } else if (rangeType === 2) {
+        console.log("✌️rangeType === 2 --->");
+        // Last YTD → Jan 1 last year → today
+        const lastYear = year - 1;
+        startDate = new Date(lastYear, 0, 1); // Jan 1 last year
+        console.log("✌️startDate --->", startDate);
+
+        endDate = new Date();
+        endDate.setFullYear(endDate.getFullYear() - 1); // today - 1 year
+        console.log("✌️endDate --->", endDate);
+      } else if (rangeType === 3) {
+        console.log("✌️rangeType === 3 --->");
+        // Last 12 months → Full last year
+        endDate = today; // today
+        startDate = new Date();
+        startDate.setFullYear(startDate.getFullYear() - 1); // today - 1 year
+        console.log("✌️startDate --->", startDate);
+        console.log("✌️endDate --->", endDate);
+      }
+
+      // Adding the calculated date range to results
+      results[String(rangeType)] = { startDate, endDate };
+    }
+    console.log("results: ", results);
+
+    return {
+      thisYTD: results[1],
+      lastYTD: results[2],
+      last12Months: results[3],
+      [String(year - 1)]: {
+        startDate: new Date(year - 2, 0, 1, 0, 0, 0),
+        endDate: new Date(year - 2, 11, 31, 23, 59, 59),
+      },
+      [String(year - 2)]: {
+        startDate: new Date(year - 3, 0, 1, 0, 0, 0),
+        endDate: new Date(year - 3, 11, 31, 23, 59, 59),
+      },
+    };
+  }
+
+  static getEfficiencyAlerts(mostRecentRecords) {
+    if (!mostRecentRecords || mostRecentRecords.length === 0) {
+      return [];
+    }
+
+    // Step 1: collect alert LogIDs
+    const alertList: string[] = [];
+    for (const record of mostRecentRecords) {
+      const totalLoss =
+        (record.condInletLoss || 0) +
+        (record.condAppLoss || 0) +
+        (record.evapTempLoss || 0) +
+        (record.evapAppLoss || 0) +
+        (record.nonCondLoss || 0) +
+        (record.deltaLoss || 0);
+
+      if (totalLoss >= 10) {
+        alertList.push(record._id);
+      }
+    }
+
+    // Step 2: filter records by alert LogIDs
+    if (alertList.length > 0) {
+      return mostRecentRecords.filter((record) =>
+        alertList.includes(record._id),
+      );
+    }
+
+    return [];
+  }
+  static async getDashboardPerformanceSummary(
+    companyId: unknown,
+    histCompanyPerformanceModel: Model<HistCompanyPerformance>,
+  ) {
+    const ranges = this.getFixedRanges(new Date());
+
+    const result: Record<string, any> = {};
+
+    for (const [label, range] of Object.entries(ranges)) {
+      const year = range.startDate.getFullYear();
+      const quarter = 0;
+      const month = 0;
+
+      const summary = await histCompanyPerformanceModel
+        .findOne({ companyId, year, quarter, month })
+        .sort({ _id: -1 })
+        .lean()
+        .exec();
+
+      result[label] = summary || {
+        averageLoss: 0,
+        targetCost: 0,
+        lossCost: 0,
+        actualCost: 0,
+        kwhLoss: 0,
+        btuLoss: 0,
+        co2: 0,
+      };
+    }
+
+    return result;
+  }
+  static async getCompanyPerformanceSummary(
+    companyId: string,
+    chillerModel: Model<Chiller>,
+    logsModel: Model<Logs>,
+  ): Promise<{ performanceSummary: Record<string, PerfSummary> }> {
+    const chillers = await chillerModel.find({
+      companyId: new mongoose.Types.ObjectId(companyId),
+    });
+
+    const ranges = this.getFixedRanges(); // Already provides { startDate, endDate }
+    const performanceSummary: Record<string, PerfSummary> = {};
+
+    for (const [rangeKey, { startDate, endDate }] of Object.entries(ranges)) {
+      const combined: PerfSummary = {
+        averageLoss: 0,
+        targetCost: 0,
+        lossCost: 0,
+        actualCost: 0,
+        kwhLoss: 0,
+        btuLoss: 0,
+        co2: 0,
+        AvgExcessCondApp: 0,
+        AvgExcessEvapApp: 0,
+        AvgOtherLoss: 0,
+      };
+
+      let chillerCount = 0;
+
+      for (const chiller of chillers) {
+        const logRecords = await this.getLogRecordsInRange(
+          startDate,
+          endDate,
+          chiller._id.toString(),
+          logsModel,
+        );
+
+        console.log("logRecords: ", logRecords);
+        if (!logRecords.length) continue;
+
+        const useRunHours = chiller.useRunHours
+          ? this.checkRunHoursForRange(logRecords)
+          : false;
+
+        const perf = await this.getPerformanceForRange(
+          logRecords,
+          useRunHours,
+          startDate,
+          logsModel,
+          chillerModel,
+        );
+
+        console.log("perf: ", perf);
+        combined.averageLoss += perf.avgLoss || 0;
+        combined.targetCost += perf.targetCost || 0;
+        combined.lossCost += perf.lossCost || 0;
+        combined.actualCost += perf.actualCost || 0;
+        combined.kwhLoss += perf.kwhLoss || 0;
+        combined.btuLoss += perf.BTULoss || 0;
+        combined.co2 += perf.CO2 || 0;
+
+        chillerCount++;
+      }
+
+      if (chillerCount > 0) {
+        combined.averageLoss = +(combined.averageLoss / chillerCount).toFixed(
+          2,
+        );
+      }
+
+      performanceSummary[rangeKey] = {
+        averageLoss: +combined.averageLoss.toFixed(2),
+        targetCost: +combined.targetCost.toFixed(2),
+        lossCost: +combined.lossCost.toFixed(2),
+        actualCost: +combined.actualCost.toFixed(2),
+        kwhLoss: +combined.kwhLoss.toFixed(2),
+        btuLoss: +combined.btuLoss.toFixed(2),
+        // co2: +combined.co2.toFixed(2),
+        co2: Math.round(combined.co2),
+        AvgExcessCondApp: 0,
+        AvgExcessEvapApp: 0,
+        AvgOtherLoss: 0,
+      };
+    }
+
+    return { performanceSummary };
+  }
+  // old functions. Do not delete
+  // async createCustomPerformanceSummaryForLocation(
+  //   locationId: number,
+  //   chillerList: number[],
+  //   startDate: Date,
+  //   endDate: Date,
+  // ) {
+  //   const perfSummary: any = {
+  //     AvgLoss: 0,
+  //     TargetCost: 0,
+  //     LossCost: 0,
+  //     ActualCost: 0,
+  //     KWHLoss: 0,
+  //     BTULoss: 0,
+  //     CO2: 0,
+  //     AvgExcessCondApp: 0,
+  //     AvgExcessEvapApp: 0,
+  //     AvgOtherLoss: 0,
+  //   };
+
+  //   let tempLossTotal = 0;
+  //   let tempOtherLossTotal = 0;
+  //   let tempExcessCondAppTotal = 0;
+  //   let tempExcessEvapAppTotal = 0;
+
+  //   const location = await this.locationService.findById(locationId);
+  //   const company = await this.companyService.findById(location.companyId);
+
+  //   if (chillerList && chillerList.length > 0) {
+  //     for (const chillerId of chillerList) {
+  //       const chillerPerfSummary =
+  //         await this.createCustomPerformanceSummaryForChiller(
+  //           chillerId,
+  //           startDate,
+  //           endDate,
+  //         );
+
+  //       tempLossTotal += chillerPerfSummary.AvgLoss;
+  //       tempOtherLossTotal += chillerPerfSummary.AvgOtherLoss;
+  //       tempExcessCondAppTotal += chillerPerfSummary.AvgExcessCondApp;
+  //       tempExcessEvapAppTotal += chillerPerfSummary.AvgExcessEvapApp;
+
+  //       perfSummary.TargetCost += chillerPerfSummary.TargetCost;
+  //       perfSummary.LossCost += chillerPerfSummary.LossCost;
+  //       perfSummary.ActualCost += chillerPerfSummary.ActualCost;
+  //       perfSummary.KWHLoss += chillerPerfSummary.KWHLoss;
+  //       perfSummary.BTULoss += chillerPerfSummary.BTULoss;
+  //       perfSummary.CO2 += chillerPerfSummary.CO2;
+  //     }
+
+  //     const divisor = chillerList.length;
+  //     perfSummary.AvgLoss = tempLossTotal / divisor;
+  //     perfSummary.AvgExcessCondApp = tempExcessCondAppTotal / divisor;
+  //     perfSummary.AvgExcessEvapApp = tempExcessEvapAppTotal / divisor;
+  //     perfSummary.AvgOtherLoss = tempOtherLossTotal / divisor;
+  //   }
+
+  //   perfSummary.LocationName = `${company.name} - ${location.name}`;
+  //   return perfSummary;
+  // }
+
+  // async createCustomPerformanceSummaryForChiller(
+  //   chillerId: number,
+  //   startDate: Date,
+  //   endDate: Date,
+  // ) {
+  //   const chiller = await this.chillerService.findById(chillerId);
+
+  //   let perfSummary: any = {
+  //     AvgLoss: 0,
+  //     TargetCost: 0,
+  //     LossCost: 0,
+  //     ActualCost: 0,
+  //     KWHLoss: 0,
+  //     BTULoss: 0,
+  //     CO2: 0,
+  //     AvgExcessCondApp: 0,
+  //     AvgExcessEvapApp: 0,
+  //     AvgOtherLoss: 0,
+  //   };
+
+  //   const logRecords = await this.logRecordService.getLogRecordsInRange(
+  //     startDate,
+  //     endDate,
+  //     chillerId,
+  //   );
+
+  //   let useRunHours = true;
+  //   let runHoursForRange = 0;
+
+  //   if (logRecords && logRecords.length > 0) {
+  //     if (!chiller.useRunHours) {
+  //       useRunHours = false;
+  //     } else {
+  //       useRunHours = this.checkRunHoursForRange(logRecords);
+  //     }
+
+  //     if (useRunHours) {
+  //       runHoursForRange = this.getRunHoursForRange(
+  //         logRecords,
+  //         chillerId,
+  //         startDate,
+  //       );
+  //     }
+
+  //     perfSummary = this.getPerformanceForRange(
+  //       logRecords,
+  //       useRunHours,
+  //       startDate,
+  //     );
+  //   } else {
+  //     runHoursForRange = 0;
+  //   }
+
+  //   perfSummary.ChillerNo = chiller.chillerNo;
+  //   return perfSummary;
+  // }
 }

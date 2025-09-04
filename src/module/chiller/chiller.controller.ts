@@ -63,8 +63,9 @@ export class ChillerController {
   @ApiBearerAuth()
   // @Public()
   @ResponseMessage(CHILLER.CHILLER_CREATE)
-  create(@Body() createChillerDto: CreateChillerDTO) {
-    return this.chillerService.create(createChillerDto);
+  create(@Body() createChillerDto: CreateChillerDTO, @Req() req) {
+    const loggedInUserId = req["user"]["_id"];
+    return this.chillerService.create(createChillerDto, loggedInUserId);
   }
 
   @Post("list")
@@ -116,8 +117,9 @@ export class ChillerController {
     description: "Forbidden: Only an Admin can create Company!",
   })
   @ResponseMessage(CHILLER.CHILLER_LIST)
-  findAllFacilities(@Body() dto?: ChillerByFacilityDto) {
-    return this.chillerService.findByFacilityIds(dto);
+  findAllFacilities(@Req() req, @Body() dto?: ChillerByFacilityDto) {
+    const loggedInUserId = req["user"]["_id"];
+    return this.chillerService.findByFacilityIds(dto, loggedInUserId);
   }
 
   @Post("findAll/activeChillers")
@@ -158,8 +160,9 @@ export class ChillerController {
   @ApiBearerAuth()
   @ResponseMessage(CHILLER.CHILLER_BY_ID)
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.chillerService.findOne(id);
+  findOne(@Param("id") id: string, @Req() req) {
+    const loggedInUserId = req["user"]["_id"];
+    return this.chillerService.findOne(id, loggedInUserId);
   }
 
   @ApiOkResponse({

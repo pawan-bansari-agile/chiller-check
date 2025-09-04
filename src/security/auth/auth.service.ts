@@ -8,6 +8,7 @@ import { Request } from "express";
 import {
   AppEnvironment,
   CompanyStatus,
+  NotificationRedirectionType,
   Role,
 } from "src/common/constants/enum.constant";
 import {
@@ -57,6 +58,7 @@ import { PhoneDto } from "src/common/helpers/twillio/phone.dto";
 import { Company, CompanyDocument } from "src/common/schema/company.schema";
 import { failedLoginAttemptsTemplate } from "src/module/image-upload/email-template/failedLoginAttempstsTemplate";
 import { userFailedLoginAttemptsTemplate } from "src/module/image-upload/email-template/userFailedLoginTemplate";
+import { NotificationService } from "src/common/services/notification.service";
 
 // dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -71,6 +73,7 @@ export class AuthService {
     private readonly commonService: CommonService,
     private readonly conversionService: ConversionService,
     private readonly emailService: EmailService,
+    private readonly notificationService: NotificationService,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(Company.name)
     private readonly companyModel: Model<CompanyDocument>,
@@ -104,23 +107,6 @@ export class AuthService {
             RESPONSE_ERROR.COMPANY_NOT_FOUND,
           );
         }
-
-        // if (
-        //   company.status != CompanyStatus.ACTIVE &&
-        //   new Date() > company.freeTrialEndDate
-        // ) {
-        //   // throw TypeExceptions.BadRequestCommonFunction(
-        //   //   RESPONSE_ERROR.FREE_TRIAL_EXPIRED,
-        //   // );
-        //   return {
-        //     blockLogin: true,
-        //     message: RESPONSE_ERROR.FREE_TRIAL_EXPIRED,
-        //   };
-        // } else {
-        //   return {
-        //     message: RESPONSE_ERROR.COMPANY_INACTIVE,
-        //   };
-        // }
         const now = new Date();
 
         const oneMinuteLater = Date.now() + 60 * 1000;
@@ -193,11 +179,37 @@ export class AuthService {
 
             for (const element of adminSubAdminUser) {
               const adminSubAdminName = `${element.firstName} ${element.lastName}`;
-
+              let role;
+              if (user.role == Role.CORPORATE_MANAGER) {
+                role = "Corporate Manager";
+              } else if (user.role == Role.FACILITY_MANAGER) {
+                role = "Facility Manager";
+              } else if (user.role == Role.OPERATOR) {
+                role = "Operator";
+              } else if (user.role == Role.SUB_ADMIN) {
+                role = "Sub Admin";
+              }
               const html = failedLoginAttemptsTemplate(
                 userFullName,
-                user.role,
+                role,
                 adminSubAdminName,
+              );
+
+              const message = `The ${role} - ${userFullName} has been inactivated due to 3 failed login attempts within 1 hour.`;
+              const payload = {
+                senderId: element._id,
+                receiverId: element._id,
+                title: "3 Failed Attempts - User Inactivated",
+                message: message,
+                type: NotificationRedirectionType.FAIL_ATTEMPTS,
+                redirection: {
+                  type: NotificationRedirectionType.FAIL_ATTEMPTS,
+                },
+              };
+
+              await this.notificationService.sendNotification(
+                payload.receiverId,
+                payload,
               );
 
               await this.emailService.emailSender({
@@ -382,23 +394,23 @@ export class AuthService {
         role: Role.ADMIN,
       },
       {
-        configKey: "database.larry",
+        configKey: "database.testUser",
         logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
         logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
         role: Role.ADMIN, // change this role accordingly
       },
-      // {
-      //   configKey: "database.testUser",
-      //   logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
-      //   logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
-      //   role: Role.ADMIN, // change this role accordingly
-      // },
-      // {
-      //   configKey: "database.sauravUser",
-      //   logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
-      //   logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
-      //   role: Role.ADMIN, // change this role accordingly
-      // },
+      {
+        configKey: "database.sauravUser",
+        logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
+        logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
+        role: Role.ADMIN, // change this role accordingly
+      },
+      {
+        configKey: "database.Agile",
+        logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
+        logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
+        role: Role.ADMIN, // change this role accordingly
+      },
     ];
     // const user1 = await this.userModel.findOne({
     //   email: this.configService.get("database.initialUser.email"),
@@ -441,16 +453,10 @@ export class AuthService {
       const password = this.configService.get(
         `${userConfig.configKey}.password`,
       );
-      console.log("✌️password --->", password);
-      console.log(
-        "✌️process.env.PASSWORD_SALT --->",
-        process.env.PASSWORD_SALT,
-      );
       const hashedPassword = await hash(
         password,
         Number(process.env.PASSWORD_SALT),
       );
-      console.log("✌️hashedPassword --->", hashedPassword);
 
       const userData: CreateInitialUserInterface = {
         firstName: this.configService.get(`${userConfig.configKey}.firstName`),
@@ -573,7 +579,7 @@ export class AuthService {
             `${process.env.ADMIN_URL}/reset-password/${passwordResetToken}`,
             `${user.firstName} ${user.lastName}`,
           ),
-          subject: "Password Reset | Chiller check",
+          subject: "Password Reset | Chiller Check",
         });
 
         return {
@@ -587,13 +593,14 @@ export class AuthService {
             `${process.env.ADMIN_URL}/reset-password/${passwordResetToken}`,
             `${user.firstName} ${user.lastName}`,
           ),
-          subject: "Password Reset | Chiller check",
+          subject: "Password Reset | Chiller Check",
         });
 
         return {
           _id: user._id,
           resetPasswordToken: passwordResetToken,
           emailTemplate: emailTemplate,
+          link: `${process.env.ADMIN_URL}/reset-password/${passwordResetToken}`,
         };
       }
     } catch (error) {

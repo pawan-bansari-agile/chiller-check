@@ -157,15 +157,25 @@ export class PaginationDto {
   @IsOptional()
   limit: number;
 
-  @ApiProperty({ name: "sort", required: false, example: "column name" })
-  @IsString()
+  @ApiProperty({ required: false, enum: ["ASC", "DESC"] })
   @IsOptional()
-  sort: string;
+  @IsString()
+  sort_order: "ASC" | "DESC";
 
-  @ApiProperty({ name: "dir", required: false, example: "asc or desc" })
+  @ApiProperty()
+  @IsOptional()
+  @IsString()
+  sort_by: string;
+
+  @ApiProperty({ required: false, example: "08-13-2025" })
   @IsString()
   @IsOptional()
-  dir: string;
+  startDate?: string;
+
+  @ApiProperty({ required: false, example: "08-15-2025" })
+  @IsString()
+  @IsOptional()
+  endDate?: string;
 }
 export class UpdateUserDto {
   @ApiProperty({
@@ -304,4 +314,30 @@ export class UpdateUserDto {
   @ValidateNested()
   @Type(() => AlertSettings)
   alerts?: AlertSettings;
+}
+
+export enum ParameterType {
+  "Percentage Loss" = "Percentage Loss",
+  "Loss Cost" = "Loss Cost",
+  // "KWH Loss" = "KWH Loss",
+  "kWh Loss" = "kWh Loss",
+  "Avg. Excess Cond. Approach" = "Avg. Excess Cond. Approach",
+  "Avg. Excess Evap. Approach" = "Avg. Excess Evap. Approach",
+  "Avg. Other Losses" = "Avg. Other Losses",
+}
+
+export enum ChartType {
+  "Line Chart" = "Line Chart",
+  "Bar Chart" = "Bar Chart",
+}
+export enum DateType {
+  "This week" = "This week",
+  "This month" = "This month",
+  "Quarter" = "Quarter",
+  "6 months" = "6 months",
+  "This year" = "This year",
+  "Last year" = "Last year",
+  "Last 2 years" = "Last 2 years",
+  "Last 5 years" = "Last 5 years",
+  "Custom Range" = "Custom Range",
 }

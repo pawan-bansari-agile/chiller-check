@@ -8,11 +8,17 @@ import {
 } from "../schema/scheduled-job.schema";
 import { Company, CompanyDocument } from "../schema/company.schema";
 import { EmailService } from "../helpers/email/email.service";
-import { CompanyStatus, Role } from "../constants/enum.constant";
+import {
+  CompanyStatus,
+  NotificationRedirectionType,
+  Role,
+} from "../constants/enum.constant";
 import { User, UserDocument } from "../schema/user.schema";
 import { freeTrialEndingTemplate } from "../helpers/email/emailTemplates/freeTrialEndingTemplate";
-import { adminSubAdminCompanyInactivatedTemplate } from "../helpers/email/emailTemplates/adminCompanyInactivatedTemplate";
+// import { adminSubAdminCompanyInactivatedTemplate } from '../helpers/email/emailTemplates/adminCompanyInactivatedTemplate';
 import { companyManagerInactivatedTemplate } from "../helpers/email/emailTemplates/companyManagerInactivatedTemplate";
+import { freeTrialEndingTemplateForAdminSubAdmin } from "../helpers/email/emailTemplates/freeTrialEndingTemplateForAdminSubAdmin";
+import { NotificationService } from "../services/notification.service";
 
 @Injectable()
 export class SchedulerService implements OnModuleInit {
@@ -25,6 +31,7 @@ export class SchedulerService implements OnModuleInit {
     @InjectModel(Company.name) private companyModel: Model<CompanyDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private readonly emailService: EmailService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async scheduleJob(
@@ -33,10 +40,10 @@ export class SchedulerService implements OnModuleInit {
     companyId: string,
     executeAt: Date,
   ) {
-    const delayMs = executeAt.getTime() - Date.now();
-    if (delayMs <= 0) {
-      return this.logger.warn(`Scheduled time already passed for job ${jobId}`);
-    }
+    // const delayMs = executeAt.getTime() - Date.now();
+    // if (delayMs <= 0) {
+    //   return this.logger.warn(`Scheduled time already passed for job ${jobId}`);
+    // }
 
     // Persist job
     await this.scheduledJobModel.updateOne(
@@ -55,17 +62,34 @@ export class SchedulerService implements OnModuleInit {
       `Persisted & scheduling job: ${jobId} at ${executeAt.toISOString()}`,
     );
 
-    const timeout = setTimeout(async () => {
-      try {
-        await this.executeJob(jobId);
-      } catch (err) {
-        this.logger.error(`Error running job ${jobId}`, err);
-      }
-    }, delayMs);
+    const cronTime = `${executeAt.getUTCMinutes()} ${executeAt.getUTCHours()} ${executeAt.getUTCDate()} ${executeAt.getUTCMonth() + 1} *`; // cron format is min hour day month weekday
 
-    this.jobs.set(jobId, {
-      stop: () => clearTimeout(timeout),
-    } as unknown as cron.ScheduledTask); // Hack to satisfy cron typings
+    // const timeout = setTimeout(async () => {
+    //   try {
+    //     await this.executeJob(jobId);
+    //   } catch (err) {
+    //     this.logger.error(`Error running job ${jobId}`, err);
+    //   }
+    // }, delayMs);
+
+    // this.jobs.set(jobId, {
+    //   stop: () => clearTimeout(timeout),
+    // } as unknown as cron.ScheduledTask); // Hack to satisfy cron typings
+    const task = cron.schedule(
+      cronTime,
+      async () => {
+        try {
+          await this.executeJob(jobId);
+          task.stop(); // Stop after one execution
+        } catch (err) {
+          this.logger.error(`Error running job ${jobId}`, err);
+        }
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { scheduled: true, timezone: "UTC" } as any,
+    );
+
+    this.jobs.set(jobId, task);
   }
 
   private async executeJob(jobId: string) {
@@ -120,11 +144,12 @@ export class SchedulerService implements OnModuleInit {
           companyManagerName =
             companyManager?.firstName + " " + companyManager?.lastName;
           tdContent = `The free trial of the Company - ${companyName} has ended so the Company Manager - ${companyManagerName} account has been inactivated.`;
-          subject = `Company Trial Ended – ${companyManagerName} Account Inactivated`;
+          subject = `Company Free Trial Ended – ${companyManagerName} Account Inactivated`;
         } else {
           companyManagerName = "Company Manager";
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           tdContent = `The free trial of the Company - ${companyName} has ended so the Company Manager account for the relevant company will be inactivated if available.`;
-          subject = `Company Trial Ended.`;
+          subject = `Company Free Trial Ended.`;
         }
 
         if (companyManager) {
@@ -137,6 +162,22 @@ export class SchedulerService implements OnModuleInit {
             { $set: { status: CompanyStatus.IN_ACTIVE } },
           );
           if (companyManager) {
+            const payload = {
+              senderId: companyManager._id,
+              receiverId: companyManager._id,
+              title: "Company Free Trial Ended",
+              message: `Your free 30-day trial has expired. Please contact our system admin at support@chillercheck.com to activate your account to continue using the system.`,
+              type: NotificationRedirectionType.COMPANY_FREE_TRIAL_ENDED,
+              redirection: {
+                type: NotificationRedirectionType.COMPANY_FREE_TRIAL_ENDED,
+              },
+            };
+
+            await this.notificationService.sendNotification(
+              payload.receiverId,
+              payload,
+            );
+
             const html = companyManagerInactivatedTemplate(companyManagerName);
 
             await this.emailService.emailSender({
@@ -151,9 +192,10 @@ export class SchedulerService implements OnModuleInit {
           });
           for (const element of adminAndSubAdmin) {
             const adminName = element?.firstName + " " + element?.lastName;
-            const html = adminSubAdminCompanyInactivatedTemplate(
+            const html = freeTrialEndingTemplateForAdminSubAdmin(
               adminName,
-              tdContent,
+              companyManagerName,
+              company?.name,
             );
 
             await this.emailService.emailSender({
@@ -174,23 +216,63 @@ export class SchedulerService implements OnModuleInit {
     }
   }
 
+  // async onModuleInit() {
+  //   this.logger.log('Restoring scheduled jobs from DB...');
+
+  //   const jobs = await this.scheduledJobModel.find({
+  //     isExecuted: false,
+  //     executeAt: { $lte: new Date() },
+  //   });
+
+  //   for (const job of jobs) {
+  //     await this.scheduleJob(
+  //       job.jobId,
+  //       job.jobType,
+  //       job.companyId,
+  //       job.executeAt
+  //     );
+  //   }
+  //   for (const job of jobs) {
+  //     await this.executeJob(job.jobId);
+  //   }
+
+  //   this.logger.log(`Restored ${jobs.length} scheduled jobs.`);
+  // }
   async onModuleInit() {
     this.logger.log("Restoring scheduled jobs from DB...");
 
+    const now = new Date();
+
     const jobs = await this.scheduledJobModel.find({
       isExecuted: false,
-      executeAt: { $gte: new Date() },
     });
 
+    let executedNow = 0;
+    let rescheduled = 0;
+
     for (const job of jobs) {
-      await this.scheduleJob(
-        job.jobId,
-        job.jobType,
-        job.companyId,
-        job.executeAt,
-      );
+      if (job.executeAt.getTime() <= now.getTime()) {
+        // Missed while app was down — run now
+        await this.executeJob(job.jobId);
+        executedNow++;
+      } else {
+        // Still scheduled for future — re-schedule
+        await this.scheduleJob(
+          job.jobId,
+          job.jobType,
+          job.companyId,
+          job.executeAt,
+        );
+        rescheduled++;
+
+        this.logger.log(
+          `Scheduled job ${job.jobId} (${job.jobType}) for ${job.executeAt.toISOString()}`,
+        );
+      }
     }
 
-    this.logger.log(`Restored ${jobs.length} scheduled jobs.`);
+    this.logger.log(
+      `Restored ${jobs.length} scheduled jobs: ${executedNow} executed immediately, ${rescheduled} re-scheduled.`,
+    );
   }
 }

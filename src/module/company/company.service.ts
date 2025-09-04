@@ -6,7 +6,11 @@ import {
   RESPONSE_SUCCESS,
   USER,
 } from "src/common/constants/response.constant";
-import { CustomError, TypeExceptions } from "src/common/helpers/exceptions";
+import {
+  AuthExceptions,
+  CustomError,
+  TypeExceptions,
+} from "src/common/helpers/exceptions";
 import { Company, CompanyDocument } from "src/common/schema/company.schema";
 import { Facility, FacilityDocument } from "src/common/schema/facility.schema";
 import {
@@ -20,6 +24,7 @@ import { Request } from "express";
 import {
   CHILLER_STATUS,
   CompanyStatus,
+  NotificationRedirectionType,
   Role,
 } from "src/common/constants/enum.constant";
 import { TABLE_NAMES } from "src/common/constants/table-name.constant";
@@ -27,6 +32,7 @@ import { Chiller } from "src/common/schema/chiller.schema";
 import { User } from "src/common/schema/user.schema";
 import { EmailService } from "src/common/helpers/email/email.service";
 import { companyInactivationTemplate } from "src/common/helpers/email/emailTemplates/companyInactivatedTemplate";
+import { NotificationService } from "src/common/services/notification.service";
 
 function escapeRegex(str: string) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -44,6 +50,7 @@ export class CompanyService {
     @InjectModel(User.name) private readonly userModel: Model<User>,
 
     private emailService: EmailService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async create(createCompanyDto: CreateCompanyDto) {
@@ -309,14 +316,24 @@ export class CompanyService {
     if (!findUser) {
       throw TypeExceptions.BadRequestCommonFunction(USER.USER_NOT_FOUND);
     }
-    if (req["user"]["role"] == Role.CORPORATE_MANAGER) {
+    if (
+      req["user"]["role"] == Role.CORPORATE_MANAGER ||
+      req["user"]["role"] == Role.FACILITY_MANAGER ||
+      req["user"]["role"] == Role.OPERATOR
+    ) {
       if (findUser.companyId) {
         return this.companyModel
           .find({ _id: findUser.companyId, isDeleted: false })
+          .sort({ createdAt: -1 }) // descending
           .exec();
+      } else {
+        return [];
       }
     } else {
-      return this.companyModel.find({ isDeleted: false }).exec();
+      return this.companyModel
+        .find({ isDeleted: false })
+        .sort({ createdAt: -1 }) // descending
+        .exec();
     }
   }
 
@@ -648,8 +665,14 @@ export class CompanyService {
   // }
 
   // working code v1
-  async findOne(companyId: string) {
+  async findOne(companyId: string, loggedUserId: string) {
     try {
+      const loggedInUser = await this.userModel.findById({
+        _id: new mongoose.Types.ObjectId(loggedUserId),
+      });
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
       const objectId = new mongoose.Types.ObjectId(companyId);
       const pipeline = [];
 
@@ -668,6 +691,7 @@ export class CompanyService {
       });
 
       // Lookup all chillers for this company
+
       pipeline.push({
         $lookup: {
           from: TABLE_NAMES.CHILLER,
@@ -676,8 +700,6 @@ export class CompanyService {
           as: "chillers",
         },
       });
-
-      // Lookup all users with role operator for this company
       pipeline.push({
         $lookup: {
           from: TABLE_NAMES.USERS,
@@ -710,7 +732,6 @@ export class CompanyService {
           as: "operators",
         },
       });
-
       // Add totalChiller and totalOperators per facility
       pipeline.push({
         $addFields: {
@@ -839,8 +860,6 @@ export class CompanyService {
           },
         },
       });
-
-      // Add total counts at company level
       pipeline.push({
         $addFields: {
           totalFacilities: { $size: "$facilities" },
@@ -867,6 +886,102 @@ export class CompanyService {
         },
       });
 
+      pipeline.push({
+        $unwind: {
+          path: "$chillers",
+          preserveNullAndEmptyArrays: true,
+        },
+      });
+
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.LOGS,
+          let: { chillerId: "$chillers._id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$chillerId", "$$chillerId"] },
+                    { $eq: ["$isDeleted", false] },
+                  ],
+                },
+              },
+            },
+            { $sort: { readingDateUTC: -1 } },
+            { $limit: 1 },
+          ],
+          as: "latestLog",
+        },
+      });
+
+      pipeline.push({
+        $addFields: {
+          "chillers.latestLog": { $arrayElemAt: ["$latestLog", 0] },
+        },
+      });
+      // 3. Lookup the user details of updatedBy
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.USERS,
+          let: { updatedById: "$chillers.latestLog.updatedBy" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$_id", "$$updatedById"] },
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                firstName: 1, // Assuming 'name' field exists
+                lastName: 1, // Assuming 'name' field exists
+              },
+            },
+          ],
+          as: "latestLogUpdater",
+        },
+      });
+      pipeline.push({
+        $addFields: {
+          "chillers.latestLog.updatedByUser": {
+            $arrayElemAt: ["$latestLogUpdater", 0],
+          },
+        },
+      });
+
+      pipeline.push({
+        $group: {
+          _id: "$_id",
+          name: { $first: "$name" },
+          address1: { $first: "$address1" },
+          address2: { $first: "$address2" },
+          city: { $first: "$city" },
+          state: { $first: "$state" },
+          zipcode: { $first: "$zipcode" },
+          country: { $first: "$country" },
+          website: { $first: "$website" },
+          totalFacilities: { $first: "$totalFacilities" },
+          companyCode: { $first: "$companyCode" },
+          totalChiller: { $first: "$totalChiller" },
+          isAssign: { $first: "$isAssign" },
+          totalOperators: { $first: "$totalOperators" },
+          address: { $first: "$address" },
+          isDeleted: { $first: "$isDeleted" },
+          createdAt: { $first: "$createdAt" },
+          facilities: { $first: "$facilities" },
+          status: { $first: "$status" },
+          chillers: { $push: "$chillers" },
+          freeTrialStartDate: { $push: "$freeTrialStartDate" },
+          freeTrialEndDate: { $push: "$freeTrialEndDate" },
+          trialReminderSent: { $push: "$trialReminderSent" },
+        },
+      });
+
+      // Lookup all users with role operator for this company
+
+      // Add total counts at company level
+
       // const [result] = await this.companyModel.aggregate(pipeline);
       // if (!result) throw CustomError.NotFound('Company not found');
 
@@ -876,14 +991,335 @@ export class CompanyService {
       //   data: result,
       // };
       const result = await this.companyModel.aggregate(pipeline);
-      return result.length ? result[0] : [];
+      if (!result || result.length === 0) {
+        throw TypeExceptions.BadRequestCommonFunction(
+          RESPONSE_ERROR.FACILITY_NOT_FOUND,
+        );
+      }
+
+      const company = result[0];
+
+      const generalConditions = loggedInUser?.alerts?.general?.conditions || [];
+
+      const evaluateCondition = (
+        value: number,
+        operator: string,
+        threshold: number,
+      ): boolean => {
+        switch (operator) {
+          case ">":
+            return value > threshold;
+          case ">=":
+            return value >= threshold;
+          case "<":
+            return value < threshold;
+          case "<=":
+            return value <= threshold;
+          case "=":
+            return value === threshold;
+          default:
+            return false;
+        }
+      };
+
+      const getLossType = (
+        metric: string,
+        value: number,
+      ): "normal" | "warning" | "alert" => {
+        const condition = generalConditions.find((c) => c.metric === metric);
+        if (!condition) return "normal";
+
+        const { warning, alert } = condition;
+        if (evaluateCondition(value, alert.operator, alert.threshold))
+          return "alert";
+        if (evaluateCondition(value, warning.operator, warning.threshold))
+          return "warning";
+        return "normal";
+      };
+
+      const formattedChillers = company?.chillers.map((chiller) => {
+        const log = chiller?.latestLog;
+
+        // Remove latestLog from chiller object temporarily
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { latestLog: _, ...rest } = chiller;
+
+        // Conditionally construct the latestLog object if it exists
+        if (Object.keys(log).length) {
+          const enhancedLog = {
+            ...log,
+            effLoss: {
+              value: log.effLoss ?? 0,
+              type: getLossType("efficiencyLoss", log.effLoss ?? 0),
+            },
+            condAppLoss: {
+              value: log.condAppLoss ?? 0,
+              type: getLossType("condenserLoss", log.condAppLoss ?? 0),
+            },
+            evapAppLoss: {
+              value: log.evapAppLoss ?? 0,
+              type: getLossType("evaporatorLoss", log.evapAppLoss ?? 0),
+            },
+            nonCondLoss: {
+              value: log.nonCondLoss ?? 0,
+              type: getLossType("nonCondenserLoss", log.nonCondLoss ?? 0),
+            },
+            otherLoss: {
+              value: log.otherLoss ?? 0,
+              type: getLossType("otherLoss", log.otherLoss ?? 0),
+            },
+          };
+
+          return {
+            ...rest,
+            latestLog: enhancedLog,
+          };
+        }
+
+        // If no latest log, just return the base chiller data (no `latestLog` key)
+        return rest;
+      });
+
+      // return result.length ? result[0] : [];
+      return {
+        ...company,
+        chillers: formattedChillers,
+      };
+    } catch (error) {
+      throw CustomError.UnknownError(error?.message, error?.status);
+    }
+  }
+  async findOneNew(companyId: string, loggedUserId: string) {
+    try {
+      const loggedInUser = await this.userModel.findById({
+        _id: new mongoose.Types.ObjectId(loggedUserId),
+      });
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
+      const objectId = new mongoose.Types.ObjectId(companyId);
+      const pipeline = [];
+
+      pipeline.push({
+        $match: { _id: objectId, isDeleted: false },
+      });
+
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.FACILITY,
+          localField: "_id",
+          foreignField: "companyId",
+          as: "facilities",
+        },
+      });
+
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.CHILLER,
+          localField: "_id",
+          foreignField: "companyId",
+          as: "chillers",
+        },
+      });
+
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.USERS,
+          let: { companyId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$role", Role.OPERATOR] },
+                    { $eq: ["$isDeleted", false] },
+                    { $eq: ["$companyId", "$$companyId"] },
+                  ],
+                },
+              },
+            },
+          ],
+          as: "operators",
+        },
+      });
+
+      // pipeline.push({
+      //   $addFields: {
+      //     chillers: {
+      //       $map: {
+      //         input: "$chillers",
+      //         as: "chiller",
+      //         in: {
+      //           $mergeObjects: [
+      //             "$$chiller",
+      //             {
+      //               latestLog: {
+      //                 $arrayElemAt: [
+      //                   {
+      //                     $filter: {
+      //                       input: {
+      //                         $slice: [
+      //                           {
+      //                             $reverseArray: {
+      //                               $filter: {
+      //                                 input: "$$chiller.logs",
+      //                                 as: "log",
+      //                                 cond: { $eq: ["$$log.isDeleted", false] },
+      //                               },
+      //                             },
+      //                           },
+      //                           1,
+      //                         ],
+      //                       },
+      //                       as: "filteredLog",
+      //                       cond: { $eq: ["$$filteredLog.isDeleted", false] },
+      //                     },
+      //                   },
+      //                   0,
+      //                 ],
+      //               },
+      //             },
+      //           ],
+      //         },
+      //       },
+      //     },
+      //   },
+      // });
+
+      pipeline.push({
+        $addFields: {
+          totalFacilities: { $size: { $ifNull: ["$facilities", []] } },
+          totalChiller: { $size: { $ifNull: ["$chillers", []] } },
+          totalOperators: { $size: { $ifNull: ["$operators", []] } },
+          address: {
+            $concat: [
+              { $ifNull: ["$address1", ""] },
+              ", ",
+              {
+                $cond: {
+                  if: { $ne: [{ $ifNull: ["$address2", ""] }, ""] },
+                  then: { $concat: [{ $ifNull: ["$address2", ""] }, ", "] },
+                  else: "",
+                },
+              },
+              { $ifNull: ["$city", ""] },
+              ", ",
+              { $ifNull: ["$state", ""] },
+              ", ",
+              { $ifNull: ["$country", ""] },
+            ],
+          },
+        },
+      });
+
+      const result = await this.companyModel.aggregate(pipeline);
+      if (!result || result.length === 0) {
+        throw TypeExceptions.BadRequestCommonFunction(
+          RESPONSE_ERROR.FACILITY_NOT_FOUND,
+        );
+      }
+
+      const company = result[0];
+      const generalConditions = loggedInUser?.alerts?.general?.conditions || [];
+
+      const evaluateCondition = (
+        value: number,
+        operator: string,
+        threshold: number,
+      ): boolean => {
+        switch (operator) {
+          case ">":
+            return value > threshold;
+          case ">=":
+            return value >= threshold;
+          case "<":
+            return value < threshold;
+          case "<=":
+            return value <= threshold;
+          case "=":
+            return value === threshold;
+          default:
+            return false;
+        }
+      };
+
+      const getLossType = (
+        metric: string,
+        value: number,
+      ): "normal" | "warning" | "alert" => {
+        const condition = generalConditions.find((c) => c.metric === metric);
+        if (!condition) return "normal";
+
+        const { warning, alert } = condition;
+        if (evaluateCondition(value, alert.operator, alert.threshold))
+          return "alert";
+        if (evaluateCondition(value, warning.operator, warning.threshold))
+          return "warning";
+        return "normal";
+      };
+
+      const formattedChillers = company?.chillers.map((chiller) => {
+        const log = chiller?.latestLog;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { latestLog: _, ...rest } = chiller;
+
+        if (log) {
+          const enhancedLog = {
+            ...log,
+            effLoss: {
+              value: log.effLoss ?? 0,
+              type: getLossType("efficiencyLoss", log.effLoss ?? 0),
+            },
+            condAppLoss: {
+              value: log.condAppLoss ?? 0,
+              type: getLossType("condenserLoss", log.condAppLoss ?? 0),
+            },
+            evapAppLoss: {
+              value: log.evapAppLoss ?? 0,
+              type: getLossType("evaporatorLoss", log.evapAppLoss ?? 0),
+            },
+            nonCondLoss: {
+              value: log.nonCondLoss ?? 0,
+              type: getLossType("nonCondenserLoss", log.nonCondLoss ?? 0),
+            },
+            otherLoss: {
+              value: log.otherLoss ?? 0,
+              type: getLossType("otherLoss", log.otherLoss ?? 0),
+            },
+          };
+
+          return {
+            ...rest,
+            latestLog: enhancedLog,
+          };
+        }
+
+        return rest;
+      });
+
+      return {
+        ...company,
+        chillers: formattedChillers,
+      };
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
   }
 
-  async updateStatus(companyId: string, body: UpdateCompanyStatusDto) {
+  async updateStatus(
+    companyId: string,
+    body: UpdateCompanyStatusDto,
+    loggedInUserId: string,
+  ) {
     try {
+      const loggedInUser = await this.userModel.findById(
+        new mongoose.Types.ObjectId(loggedInUserId),
+      );
+
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
+
       const { status } = body;
 
       // Check if the company exists
@@ -944,6 +1380,36 @@ export class CompanyService {
             subject: `Your Company Status for ${company.name} has changed.`,
             html: html,
           });
+
+          const facilities = await this.facilityModel.find({
+            companyId: company._id,
+          });
+
+          if (facilities) {
+            const facilityNames = [];
+
+            facilities.map((f) => {
+              facilityNames.push({ name: f.name, _id: f._id });
+            });
+
+            facilityNames.map(async (f) => {
+              const notifMessage = `The Facility - ${f.name} has been inactivated also all the chillers under are also inactivated. The log entries already entered will remain as they are, just they won't be a part of the calculations anymore.`;
+              await this.notificationService.sendNotification(
+                companyManager._id,
+                {
+                  senderId: null,
+                  receiverId: companyManager._id,
+                  title: "Facility Inactivated",
+                  message: notifMessage,
+                  type: NotificationRedirectionType.FACILITY_INACTIVATED,
+                  redirection: {
+                    facilityId: f._id,
+                    type: NotificationRedirectionType.FACILITY_INACTIVATED,
+                  },
+                },
+              );
+            });
+          }
         }
 
         if (company.facilities.length > 0) {
@@ -969,6 +1435,37 @@ export class CompanyService {
                 lastName: fm.lastName,
                 email: fm.email,
               });
+            });
+
+            const facilities = await this.facilityModel.find({
+              _id: { $in: company.facilities },
+            });
+
+            facilities.map(async (f) => {
+              const facilityManager = await this.userModel.findOne({
+                role: Role.FACILITY_MANAGER,
+                facilityIds: f._id,
+              });
+
+              if (facilityManager) {
+                const message = `The Facility - ${f.name} has been inactivated also all the chillers under are also inactivated. The log entries already entered will remain as they are, just they won't be a part of the calculations anymore.`;
+                const payload = {
+                  senderId: null,
+                  receiverId: facilityManager._id,
+                  title: "Facility Inactivated",
+                  message: message,
+                  type: NotificationRedirectionType.FACILITY_INACTIVATED,
+                  redirection: {
+                    facilityId: f._id,
+                    type: NotificationRedirectionType.FACILITY_INACTIVATED,
+                  },
+                };
+
+                await this.notificationService.sendNotification(
+                  payload.receiverId,
+                  payload,
+                );
+              }
             });
           }
 
@@ -1007,6 +1504,27 @@ export class CompanyService {
               { $set: { status: CHILLER_STATUS.InActive } },
             );
 
+            chillers.map(async (c) => {
+              console.log("✌️c --->", c);
+              // const notifyMessage = `Chiller - '${c.ChillerNo} ${c.serialNumber}' has been inactivated. New log entries will be prohibited but the existing data will remain as it is. It was inactivated by ${loggedInUser.role} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`;
+              // const payload = {
+              //   senderId: '',
+              //   receiverId: companyManager._id,
+              //   title: 'Chiller Inactivated',
+              //   message: notifyMessage,
+              //   type: NotificationRedirectionType.CHILLER_INACTIVATED,
+              //   redirection: {
+              //     chillerId: chiller._id,
+              //     type: NotificationRedirectionType.CHILLER_INACTIVATED,
+              //   },
+              // };
+
+              // await this.notificationService.sendNotification(
+              //   payload.receiverId,
+              //   payload
+              // );
+            });
+
             if (chillerIds.length > 0) {
               const operators = await this.userModel.find({
                 role: Role.OPERATOR,
@@ -1037,10 +1555,32 @@ export class CompanyService {
     }
   }
 
-  async findAllActiveCompany() {
-    const activeCompanies = await this.companyModel.find({
-      status: CompanyStatus.ACTIVE,
+  async findAllActiveCompany(req: Request) {
+    const findUser = await this.userModel.findOne({
+      _id: req["user"]["_id"],
     });
+
+    if (
+      req["user"]["role"] == Role.CORPORATE_MANAGER ||
+      req["user"]["role"] == Role.FACILITY_MANAGER ||
+      req["user"]["role"] == Role.OPERATOR
+    ) {
+      if (findUser.companyId) {
+        const activeCompanies = await this.companyModel
+          .find({
+            status: { $in: [CompanyStatus.ACTIVE, CompanyStatus.DEMO] },
+          })
+          .sort({ createdAt: -1 });
+        return activeCompanies;
+      } else {
+        return [];
+      }
+    }
+    const activeCompanies = await this.companyModel
+      .find({
+        status: { $in: [CompanyStatus.ACTIVE, CompanyStatus.DEMO] },
+      })
+      .sort({ createdAt: -1 });
 
     if (activeCompanies.length == 0) {
       throw TypeExceptions.BadRequestCommonFunction(

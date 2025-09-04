@@ -15,6 +15,16 @@ export class CreateLogDTO {
   @IsString()
   chillerId?: string;
 
+  @ApiProperty({ description: "The ID Of the company" })
+  @IsNotEmpty()
+  @IsString()
+  companyId?: string;
+
+  @ApiProperty({ description: "The ID Of the facility" })
+  @IsNotEmpty()
+  @IsString()
+  facilityId?: string;
+
   @ApiProperty({ description: "The ID Of the user (operator)" })
   @IsNotEmpty()
   // @IsArray()
@@ -451,7 +461,7 @@ export class LogListDto {
 
   @ApiProperty()
   @IsOptional()
-  userId: string;
+  chillerId: string;
 
   @ApiProperty()
   @IsOptional()

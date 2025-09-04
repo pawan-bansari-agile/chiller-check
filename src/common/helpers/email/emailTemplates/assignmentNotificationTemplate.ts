@@ -7,6 +7,7 @@ export const assignmentNotificationTemplate = (
 ): string => {
   const greeting = `Hi ${fullName},`;
   let body = "";
+  let title = "";
 
   const entityList =
     Array.isArray(entityName) && entityName.length > 1
@@ -15,20 +16,21 @@ export const assignmentNotificationTemplate = (
           .join("")}</ul>`
       : `<strong>${Array.isArray(entityName) ? entityName[0] : entityName}</strong>`;
 
-  const closing = "Thanks.";
-
   switch (role) {
     case Role.CORPORATE_MANAGER:
+      title = "Company Assigned";
       body = `You have been assigned a new Company - ${entityList}.<br/><br/>
               You can now manage the data under this company & its users.`;
       break;
 
     case Role.FACILITY_MANAGER:
+      title = "Facility Assigned";
       body = `You have been assigned ${Array.isArray(entityName) && entityName.length > 1 ? "multiple Facilities" : "a new Facility"} - ${entityList}.<br/><br/>
               You can now manage the data under this facility & its users.`;
       break;
 
     case Role.OPERATOR:
+      title = "Chiller Assigned";
       body = `You have been assigned ${Array.isArray(entityName) && entityName.length > 1 ? "multiple Chillers" : "a new Chiller"} - ${entityList}<br/><br/>
               You can now manage the data under this chiller.`;
       break;
@@ -169,30 +171,38 @@ export const assignmentNotificationTemplate = (
                 font-weight: 400;
                 font-size: 14px;
                 line-height: 131%;
-                padding-bottom: 120px;
+                padding-bottom: 30px;
               "
             >
+              <tr>
+                <td style="text-align: center;display: inline-block;width: 100%;font-weight: 700;font-size: 20px;color: #101112;line-height: 25px;padding-bottom: 55px;">
+                  <span style="border-bottom: 1px solid #00a86b;padding-bottom: 10px;">${title}</span>
+                </td>
+              </tr>
               <tr>
                 <td style="padding-bottom: 20px;">${greeting}</td>
               </tr>
               <tr>
                 <td style="padding-bottom: 20px;">${body}</td>
               </tr>
-              <tr>
-                <td style="padding-bottom: 20px;">${closing}</td>
-              </tr>
-              <tr>
-                <td style="padding-bottom: 30px;">
-               The Chiller Check Team
+            <tr>
+                <td style="padding:45px 50px 60px;">
+                    <table style="border: 0;border-spacing:0;">
+                        <tr>
+                            <td style="font-weight: 600;font-size: 17px;color: #404040;line-height: 23px;">
+                                Thanks, <span style="display: block;">The Chiller Check Team</span>
+                            </td>
+                        </tr>
+                    </table>
                 </td>
-              </tr>
-              <tr>
+            </tr>
+            <tr>
                 <td style="padding:0 ;">
                     <table style="border: 0;border-spacing:0;width: 100%;text-align: center;">
                         <tr>
-                            <td
-                                style="padding:10px;background-color: #13132A;font-weight: 400;font-size: 13px;letter-spacing: 0.5px;color: #FFFFFF;">
-                                Copyright ©2025 Chiller check | All Rights Reserved </td>
+                            <td style="padding:10px;background-color: #13132A;font-weight: 400;font-size: 13px;letter-spacing: 0.5px;color: #FFFFFF;">
+                                Copyright ©2025 Chiller Check | All Rights Reserved
+                            </td>
                         </tr>
                     </table>
                 </td>

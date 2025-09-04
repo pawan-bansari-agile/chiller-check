@@ -15,6 +15,7 @@ import * as fs from "fs";
 import { ResponseMessage } from "src/common/decorators/response.decorator";
 import { RESPONSE_SUCCESS } from "src/common/constants/response.constant";
 import { Public } from "src/security/auth/auth.decorator";
+import { AppEnvironment } from "src/common/constants/enum.constant";
 @Controller("")
 @ApiTags("Common - Image upload")
 export class ImageUploadController {
@@ -28,7 +29,7 @@ export class ImageUploadController {
     AnyFilesInterceptor({
       storage: diskStorage({
         destination: (req, file, callback) => {
-          const uploadDirAllFiles = "./media/allFiles";
+          const uploadDirAllFiles = "./tmp-chiller-check/profilePic";
 
           // Create the directory if it doesn't exist
           fs.mkdirSync(uploadDirAllFiles, { recursive: true });
@@ -36,6 +37,7 @@ export class ImageUploadController {
         },
         filename: (req, file, callback) => {
           const filename = `${Date.now()}-${file.originalname}`;
+          console.log("filename: ", filename);
           callback(null, filename);
         },
       }),
@@ -46,15 +48,19 @@ export class ImageUploadController {
     @Body() params: FileMultipleUploadDto,
     @Res() res: Response,
   ) {
-    // this upload service use for a upload image in s3
-    const result = await this.imageUploadService.uploadMultipleFileS3(
-      res,
-      files,
-      params,
-    );
+    // Toggle between S3 and local based on environment
+    const isLocal = process.env.APP_ENV === AppEnvironment.LOCAL;
+    const result = isLocal
+      ? await this.imageUploadService.uploadMultipleFileLocal(
+          res,
+          files,
+          params,
+        )
+      : await this.imageUploadService.uploadMultipleFileS3(res, files, params);
     // Delete local files after successful upload
     files.forEach((file) => {
-      fs.unlinkSync(`./media/allFiles/${file.filename}`);
+      console.log("✌️file --->", file);
+      // fs.unlinkSync(`./media/allFiles/${file.filename}`);
     });
     return result;
   }

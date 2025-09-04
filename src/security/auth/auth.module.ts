@@ -22,6 +22,11 @@ import {
 } from "src/common/schema/altitudeCorrection.schema";
 import { Company, CompanySchema } from "src/common/schema/company.schema";
 import { EmailService } from "src/common/helpers/email/email.service";
+import { NotificationService } from "src/common/services/notification.service";
+import {
+  Notification,
+  NotificationSchema,
+} from "src/common/schema/notification.schema";
 
 @Module({
   imports: [
@@ -31,6 +36,8 @@ import { EmailService } from "src/common/helpers/email/email.service";
       { name: Conversion.name, schema: ConversionSchema },
       { name: AltitudeCorrection.name, schema: AltitudeCorrectionSchema },
       { name: Company.name, schema: CompanySchema },
+      { name: Notification.name, schema: NotificationSchema },
+      { name: Device.name, schema: DeviceSchema },
     ]),
     PassportModule,
     JwtModule.registerAsync({
@@ -51,6 +58,7 @@ import { EmailService } from "src/common/helpers/email/email.service";
     CommonService,
     ConversionService,
     EmailService,
+    NotificationService,
   ],
   controllers: [AuthController],
   exports: [AuthService],

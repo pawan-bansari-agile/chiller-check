@@ -31,7 +31,6 @@ import {
 } from "@nestjs/swagger";
 import { LOGS } from "src/common/constants/response.constant";
 import { ResponseMessage } from "src/common/decorators/response.decorator";
-import { Public } from "src/security/auth/auth.decorator";
 import { FileInterceptor } from "@nestjs/platform-express";
 
 @ApiBearerAuth()
@@ -60,7 +59,7 @@ export class LogController {
     description: "Forbidden: Only an Admin can create Company!",
   })
   // @ApiBearerAuth()
-  @Public()
+  // @Public()
   @ResponseMessage(LOGS.LOG_CREATE)
   create(@Body() createLogDto: CreateLogDTO, @Req() req) {
     const userId = req["user"]["_id"];
@@ -146,15 +145,18 @@ export class LogController {
     const loggedInUserId = req["user"]["_id"];
     return await this.logService.update(id, updateLogDto, loggedInUserId);
   }
+
   @Post("exportSelectedLogsExcel")
+  @ResponseMessage(LOGS.LOG_EXPORT)
   @ApiOperation({
     summary: "export selected all Mandate Request",
   })
   exportSelectedLogsExcel(@Body() body: ExportLogIds) {
     return this.logService.exportSelectedLogsExcel(body);
   }
-  @Post("importMandateSuccessExcel")
+  @Post("importBulkLogExcel")
   @ApiConsumes("multipart/form-data")
+  @ResponseMessage(LOGS.LOG_IMPORT)
   @ApiBody({
     description: "Upload CSV file",
     type: FileUploadLogDto,
@@ -163,8 +165,8 @@ export class LogController {
     summary: "Get all import logs",
   })
   @UseInterceptors(FileInterceptor("file"))
-  importMandateSuccessExcel(@UploadedFile() file: FileUploadLogDto) {
-    return this.logService.importLogExcel(file);
+  importLogExcel(@Req() req: Request, @UploadedFile() file: FileUploadLogDto) {
+    return this.logService.importLogExcel(file, req);
   }
 
   @Delete(":id")

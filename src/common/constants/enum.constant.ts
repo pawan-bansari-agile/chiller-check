@@ -54,6 +54,7 @@ export const tmpFolderName = "tmp-chiller-check";
 export const folderName = "chiller-check";
 export enum UploadFolderEnum {
   PROFILE_PIC = "profilePic",
+  MAINTENANCE_FILES = "maintenanceFiles",
 }
 
 export const ALTITUDE_UNITS = {
@@ -244,4 +245,52 @@ export const STATES = {
   "Northern Mariana Islands": "MP",
   "Puerto Rico": "PR",
   "U.S. Virgin Islands": "VI",
+
+  // Canada - Provinces
+  Alberta: "AB",
+  "British Columbia": "BC",
+  Manitoba: "MB",
+  "New Brunswick": "NB",
+  "Newfoundland and Labrador": "NL",
+  "Nova Scotia": "NS",
+  Ontario: "ON",
+  "Prince Edward Island": "PE",
+  Quebec: "QC",
+  Saskatchewan: "SK",
+
+  // Canada - Territories
+  "Northwest Territories": "NT",
+  Nunavut: "NU",
+  Yukon: "YT",
 };
+export enum NotificationRedirectionType {
+  COMPANY_FREE_TRIAL_ENDED = "companyFreeTrialEnded",
+  FAIL_ATTEMPTS = "failAttempts",
+  COMPANY_ASSIGNED = "companyAssigned",
+  FACILITY_ASSIGNED = "facilityAssigned",
+  FACILITY_INACTIVATED = "facilityInactivated",
+  FACILITY_ACTIVATED = "facilityActivated",
+  FACILITY_ADDED = "facilityAdded",
+  FACILITY_UPDATED = "facilityUpdated",
+  CHILLER_ASSIGNED = "chillerAssigned",
+  CHILLER_ADDED = "chillerAdded",
+  CHILLER_ACTIVATED = "chillerActivated",
+  CHILLER_INACTIVATED = "chillerInactivated",
+  CHILLER_UPDATED = "chillerUpdated",
+  USER_INACTIVATED = "userInactivated",
+  USER_UPDATED = "userUpdated",
+  REPORT_SHARED = "reportShared",
+}
+export function userRoleName(role: string) {
+  if (role == Role.ADMIN) {
+    return "Admin";
+  } else if (role == Role.SUB_ADMIN) {
+    return "Sub Admin";
+  } else if (role == Role.CORPORATE_MANAGER) {
+    return "Corporate Manager";
+  } else if (role == Role.FACILITY_MANAGER) {
+    return "Facility Manager";
+  } else if (role == Role.OPERATOR) {
+    return "Operator";
+  }
+}

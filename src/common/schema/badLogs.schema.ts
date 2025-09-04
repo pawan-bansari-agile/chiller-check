@@ -15,19 +15,19 @@ export type BadLogDocument = BadLog &
   versionKey: false,
 })
 export class BadLog {
-  @Prop({ required: true })
+  @Prop({})
   chillerID: string;
 
-  @Prop({ required: true })
+  @Prop({})
   userId: string;
 
-  @Prop({ required: true, type: MongooseSchema.Types.ObjectId })
+  @Prop({ type: MongooseSchema.Types.ObjectId })
   updatedBy: mongoose.Types.ObjectId;
 
-  @Prop({ required: true })
+  @Prop({})
   readingDate: string;
 
-  @Prop({ required: true })
+  @Prop({})
   readingDateUTC: string;
 
   @Prop() condInletTemp: number;

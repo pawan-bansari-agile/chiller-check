@@ -51,10 +51,13 @@ export class CreateChillerDTO {
   // @IsString()
   // name: string;
 
-  @ApiProperty({ description: "Chiller Name/No" })
+  @ApiProperty({ description: "Chiller Name" })
   @IsNotEmpty()
   @IsString()
   ChillerNo: string;
+
+  @ApiProperty({ description: "Chiller Number" })
+  ChillerNumber: string;
 
   @ApiProperty({
     description: "Weekly Hours Of Operation:",
@@ -351,6 +354,13 @@ export class CreateChillerDTO {
   @IsOptional()
   @IsString()
   status: string;
+
+  @ApiProperty({
+    description: "Emission Factor",
+  })
+  @IsOptional()
+  @IsNumber()
+  emissionFactor: number;
 }
 
 // <cfif variables.isMetric>

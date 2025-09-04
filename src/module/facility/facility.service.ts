@@ -8,7 +8,11 @@ import {
 } from "src/common/constants/response.constant";
 import { TABLE_NAMES } from "src/common/constants/table-name.constant";
 
-import { CustomError, TypeExceptions } from "src/common/helpers/exceptions";
+import {
+  AuthExceptions,
+  CustomError,
+  TypeExceptions,
+} from "src/common/helpers/exceptions";
 import { Chiller } from "src/common/schema/chiller.schema";
 import { Company } from "src/common/schema/company.schema";
 import { Facility, FacilityDocument } from "src/common/schema/facility.schema";
@@ -24,11 +28,14 @@ import {
   CHILLER_STATUS,
   ChillerStatus,
   MEASUREMENT_UNITS,
+  NotificationRedirectionType,
   Role,
+  userRoleName,
 } from "src/common/constants/enum.constant";
 import { User } from "src/common/schema/user.schema";
 import { facilityStatusTemplate } from "src/common/helpers/email/emailTemplates/facilityStatusTemplate";
 import { EmailService } from "src/common/helpers/email/email.service";
+import { NotificationService } from "src/common/services/notification.service";
 
 @Injectable()
 export class FacilityService {
@@ -38,8 +45,9 @@ export class FacilityService {
     @InjectModel(Company.name) private readonly companyModel: Model<Company>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private emailService: EmailService,
+    private readonly notificationService: NotificationService,
   ) {}
-  async create(createFacilityDto: CreateFacilityDTO) {
+  async create(createFacilityDto: CreateFacilityDTO, loggedInUserId: string) {
     // const { companyId, name, chillers, ...facilityDetails } = createFacilityDto;
     try {
       const {
@@ -56,6 +64,14 @@ export class FacilityService {
         altitudeUnit,
         chillers, // Optional chillers array
       } = createFacilityDto;
+
+      const loggedInUser = await this.userModel.findById({
+        _id: new mongoose.Types.ObjectId(loggedInUserId),
+      });
+
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
 
       const companyObjectId = new mongoose.Types.ObjectId(companyId);
 
@@ -173,6 +189,21 @@ export class FacilityService {
         console.log("✌️chillerDocs --->", chillerDocs);
 
         const createdChillers = await this.chillerModel.create(chillerDocs);
+
+        const companyManager = await this.userModel.findOne({
+          companyId: new mongoose.Types.ObjectId(createFacilityDto.companyId),
+          role: Role.CORPORATE_MANAGER,
+        });
+
+        const company = await this.companyModel.findById(
+          new mongoose.Types.ObjectId(createFacilityDto.companyId),
+        );
+
+        let companyName = "";
+        if (company) {
+          companyName = company?.name || "";
+        }
+
         const chillerIds: mongoose.Types.ObjectId[] = [];
 
         for (const chiller of createdChillers) {
@@ -180,8 +211,60 @@ export class FacilityService {
           chillerIds.push(chiller._id as mongoose.Types.ObjectId);
         }
 
+        if (companyManager) {
+          const adminRoleText = userRoleName(loggedInUser.role);
+          createdChillers.map(async (c) => {
+            const message = `A new Chiller - '${c.ChillerNo} ${c.serialNumber}' has been added under the Company - ${companyName} by ${adminRoleText} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`;
+            await this.notificationService.sendNotification(
+              companyManager._id,
+              {
+                senderId: null,
+                receiverId: companyManager._id,
+                title: "Chiller Added",
+                message: message,
+                type: NotificationRedirectionType.CHILLER_ADDED,
+                redirection: {
+                  chillerId: c._id,
+                  type: NotificationRedirectionType.CHILLER_ADDED,
+                },
+              },
+            );
+          });
+        }
+
         createdFacility.chillers = chillerIds;
         await createdFacility.save();
+
+        // const company = await this.companyModel.findOne({
+        //   _id: new mongoose.Types.ObjectId(createFacilityDto.companyId),
+        // });
+        // console.log("✌️company --->", company);
+
+        // const companyManager = await this.userModel.findOne({
+        //   role: Role.CORPORATE_MANAGER,
+        //   companyId: new mongoose.Types.ObjectId(createFacilityDto.companyId),
+        // });
+
+        if (companyManager) {
+          const adminRoleText = userRoleName(loggedInUser.role);
+          const message = ` A new Facility - ${createdFacility.name} has been added under the Company - ${companyName} by ${adminRoleText} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`;
+          const payload = {
+            senderId: null,
+            receiverId: companyManager._id,
+            title: "Facility Added.",
+            message: message,
+            type: NotificationRedirectionType.FACILITY_ADDED,
+            redirection: {
+              facilityId: createdFacility._id,
+              type: NotificationRedirectionType.FACILITY_ADDED,
+            },
+          };
+
+          await this.notificationService.sendNotification(
+            payload.receiverId,
+            payload,
+          );
+        }
 
         // Update total chillers count for the facility
         await this.facilityModel.updateOne(
@@ -464,7 +547,7 @@ export class FacilityService {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
   }
-  async findOne(id: string) {
+  async findOne(id: string, loggedInUserId: string) {
     // Step 1: Find the facility by ID
     // const facility = await this.facilityModel
     //   .findById(id)
@@ -486,6 +569,15 @@ export class FacilityService {
           RESPONSE_ERROR.INVALID_ID,
         );
       }
+
+      const loggedInUser = await this.userModel.findById({
+        _id: new mongoose.Types.ObjectId(loggedInUserId),
+      });
+
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
+
       const matchObj = {
         isDeleted: false,
         _id: new mongoose.Types.ObjectId(id),
@@ -502,15 +594,111 @@ export class FacilityService {
           from: TABLE_NAMES.CHILLER, // Name of the Chiller collection
           localField: "_id", // Facility _id
           foreignField: "facilityId", // Chiller facilityId field
+          pipeline: [{ $match: { isDeleted: false } }],
           as: "chillers", // The result of the join will be populated under 'chillers'
         },
       });
-      // pipeline.push({
-      //   $unwind: {
-      //     path: "$chillers",
-      //     preserveNullAndEmptyArrays: true, // In case company is missing
-      //   },
-      // });
+
+      pipeline.push({
+        $unwind: {
+          path: "$chillers",
+          preserveNullAndEmptyArrays: true,
+        },
+      });
+
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.LOGS,
+          let: { chillerId: "$chillers._id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$chillerId", "$$chillerId"] },
+                    { $eq: ["$isDeleted", false] },
+                  ],
+                },
+              },
+            },
+            { $sort: { readingDateUTC: -1 } },
+            { $limit: 1 },
+          ],
+          as: "latestLog",
+        },
+      });
+
+      pipeline.push({
+        $addFields: {
+          "chillers.latestLog": { $arrayElemAt: ["$latestLog", 0] },
+        },
+      });
+
+      // 3. Lookup the user details of updatedBy
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.USERS,
+          let: { updatedById: "$chillers.latestLog.updatedBy" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$_id", "$$updatedById"] },
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                firstName: 1, // Assuming 'name' field exists
+                lastName: 1, // Assuming 'name' field exists
+              },
+            },
+          ],
+          as: "latestLogUpdater",
+        },
+      });
+      pipeline.push({
+        $addFields: {
+          "chillers.latestLog.updatedByUser": {
+            $arrayElemAt: ["$latestLogUpdater", 0],
+          },
+        },
+      });
+      pipeline.push({
+        $group: {
+          _id: "$_id",
+          name: { $first: "$name" },
+          address1: { $first: "$address1" },
+          address2: { $first: "$address2" },
+          city: { $first: "$city" },
+          state: { $first: "$state" },
+          zipcode: { $first: "$zipcode" },
+          country: { $first: "$country" },
+          companyId: { $first: "$companyId" },
+          facilityCode: { $first: "$facilityCode" },
+          timezone: { $first: "$timezone" },
+          altitude: { $first: "$altitude" },
+          altitudeUnit: { $first: "$altitudeUnit" },
+          totalChiller: { $first: "$totalChiller" },
+          totalOperators: { $first: "$totalOperators" },
+          isActive: { $first: "$isActive" },
+          isDeleted: { $first: "$isDeleted" },
+          createdAt: { $first: "$createdAt" },
+          chillers: { $push: "$chillers" },
+        },
+      });
+
+      // Filter out null/empty chillers so the array becomes [] instead of [null/{}]
+      pipeline.push({
+        $addFields: {
+          chillers: {
+            $filter: {
+              input: "$chillers",
+              as: "ch",
+              cond: { $and: [{ $ne: ["$$ch", null] }, { $ne: ["$$ch", {}] }] },
+            },
+          },
+        },
+      });
 
       pipeline.push({
         $lookup: {
@@ -575,30 +763,126 @@ export class FacilityService {
       // Step 5: Execute the aggregation pipeline
       const result = await this.facilityModel.aggregate(pipeline);
 
-      // Step 6: Return the result
-      if (result.length) {
-        // return result[0]; // Return the first result as the response
-        const facility = result[0];
-        // facility.chillers = facility.chillers.map((chiller) => {
-        //   if (
-        //     typeof chiller.tons === "number" &&
-        //     typeof chiller.unit === "string" &&
-        //     chiller.unit.toLowerCase().includes("si")
-        //   ) {
-        //     return {
-        //       ...chiller,
-        //       tons: parseFloat((chiller.tons * 3.51685).toFixed(2)), // return kwr in same field
-        //     };
-        //   }
-        //   return chiller;
-        // });
-
-        return facility;
-      } else {
+      if (!result || result.length === 0) {
         throw TypeExceptions.BadRequestCommonFunction(
           RESPONSE_ERROR.FACILITY_NOT_FOUND,
         );
       }
+
+      const facility = result[0];
+
+      const generalConditions = loggedInUser?.alerts?.general?.conditions || [];
+
+      const evaluateCondition = (
+        value: number,
+        operator: string,
+        threshold: number,
+      ): boolean => {
+        switch (operator) {
+          case ">":
+            return value > threshold;
+          case ">=":
+            return value >= threshold;
+          case "<":
+            return value < threshold;
+          case "<=":
+            return value <= threshold;
+          case "=":
+            return value === threshold;
+          default:
+            return false;
+        }
+      };
+
+      const getLossType = (
+        metric: string,
+        value: number,
+      ): "normal" | "warning" | "alert" => {
+        const condition = generalConditions.find((c) => c.metric === metric);
+        if (!condition) return "normal";
+
+        const { warning, alert } = condition;
+        if (evaluateCondition(value, alert.operator, alert.threshold))
+          return "alert";
+        if (evaluateCondition(value, warning.operator, warning.threshold))
+          return "warning";
+        return "normal";
+      };
+
+      const formattedChillers = (facility?.chillers || [])
+        .filter((chiller) => chiller && chiller._id)
+        .map((chiller) => {
+          const log = chiller?.latestLog;
+
+          // Remove latestLog from chiller object temporarily
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { latestLog: _, ...rest } = chiller;
+
+          // Conditionally construct the latestLog object if it exists
+          if (Object.keys(log).length) {
+            const enhancedLog = {
+              ...log,
+              effLoss: {
+                value: log.effLoss ?? 0,
+                type: getLossType("efficiencyLoss", log.effLoss ?? 0),
+              },
+              condAppLoss: {
+                value: log.condAppLoss ?? 0,
+                type: getLossType("condenserLoss", log.condAppLoss ?? 0),
+              },
+              evapAppLoss: {
+                value: log.evapAppLoss ?? 0,
+                type: getLossType("evaporatorLoss", log.evapAppLoss ?? 0),
+              },
+              nonCondLoss: {
+                value: log.nonCondLoss ?? 0,
+                type: getLossType("nonCondenserLoss", log.nonCondLoss ?? 0),
+              },
+              otherLoss: {
+                value: log.otherLoss ?? 0,
+                type: getLossType("otherLoss", log.otherLoss ?? 0),
+              },
+            };
+
+            return {
+              ...rest,
+              latestLog: enhancedLog,
+            };
+          }
+
+          // If no latest log, just return the base chiller data (no `latestLog` key)
+          return rest;
+        });
+
+      // Step 6: Return the result
+      // if (result.length) {
+      //   // return result[0]; // Return the first result as the response
+      //   const facility = result[0];
+      //   // facility.chillers = facility.chillers.map((chiller) => {
+      //   //   if (
+      //   //     typeof chiller.tons === "number" &&
+      //   //     typeof chiller.unit === "string" &&
+      //   //     chiller.unit.toLowerCase().includes("si")
+      //   //   ) {
+      //   //     return {
+      //   //       ...chiller,
+      //   //       tons: parseFloat((chiller.tons * 3.51685).toFixed(2)), // return kwr in same field
+      //   //     };
+      //   //   }
+      //   //   return chiller;
+      //   // });
+
+      //   return facility;
+      // } else {
+      //   throw TypeExceptions.BadRequestCommonFunction(
+      //     RESPONSE_ERROR.FACILITY_NOT_FOUND
+      //   );
+      // }
+
+      return {
+        ...facility,
+        chillers: formattedChillers,
+      };
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
@@ -716,8 +1000,16 @@ export class FacilityService {
   //   }
   // }
 
-  async update(id: string, body: UpdateFacilityDto) {
+  async update(id: string, body: UpdateFacilityDto, loggedInUserId: string) {
     try {
+      const loggedInUser = await this.userModel.findById(
+        new mongoose.Types.ObjectId(loggedInUserId),
+      );
+
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
+
       const chillers = body.chillers;
 
       // Step 1: Validate facility existence
@@ -1015,6 +1307,27 @@ export class FacilityService {
 
       // return result[0];
       const facility = result[0];
+
+      const companyManager = await this.userModel.findOne({
+        role: Role.CORPORATE_MANAGER,
+        companyId: facility.companyId,
+      });
+
+      if (companyManager) {
+        const adminRoleText = userRoleName(loggedInUser.role);
+        const message = `Facility - ${facility.name} has been updated. The update was done by ${adminRoleText} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`;
+        await this.notificationService.sendNotification(companyManager._id, {
+          senderId: null,
+          receiverId: companyManager._id,
+          title: "Facility updated",
+          message: message,
+          type: NotificationRedirectionType.FACILITY_UPDATED,
+          redirection: {
+            facilityId: facility._id,
+            type: NotificationRedirectionType.FACILITY_UPDATED,
+          },
+        });
+      }
       // facility.chillers = facility.chillers.map((chiller) => {
       //   if (
       //     typeof chiller.tons === 'number' &&
@@ -1038,9 +1351,21 @@ export class FacilityService {
     }
   }
 
-  async updateStatus(facilityId: string, body: UpdateFacilityStatusDto) {
+  async updateStatus(
+    facilityId: string,
+    body: UpdateFacilityStatusDto,
+    loggedInUserId: string,
+  ) {
     try {
       const { isActive } = body;
+
+      const loggedInUser = await this.userModel.findById(
+        new mongoose.Types.ObjectId(loggedInUserId),
+      );
+
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
 
       // Check if facility exists
       const facility = await this.facilityModel.findById(facilityId);
@@ -1062,13 +1387,6 @@ export class FacilityService {
 
       // If the facility is being deactivated, deactivate all chillers associated with it
       if (!isActive) {
-        // Use lookup to find the chillers associated with the facility
-        // const chillers = await this.chillerModel.aggregate([
-        //   {
-        //     $match: { facilityId: new mongoose.Types.ObjectId(facilityId) }, // Match chillers that belong to this facility
-        //   },
-        // ]);
-
         // Inactivate the chillers
         if (facility.chillers && facility.chillers.length > 0) {
           await this.chillerModel.updateMany(
@@ -1076,6 +1394,72 @@ export class FacilityService {
             { $set: { status: ChillerStatus.InActive } }, // Set the isActive status of the chillers to false
           );
         }
+      }
+
+      const company = await this.companyModel.findOne({
+        _id: new mongoose.Types.ObjectId(facility.companyId),
+      });
+
+      // if (!company) {
+      //   throw AuthExceptions.AccountNotExist();
+      // }
+
+      const companyManager = await this.userModel.findOne({
+        role: Role.CORPORATE_MANAGER,
+        companyId: company._id,
+      });
+
+      const facilityManager = await this.userModel.findOne({
+        role: Role.FACILITY_MANAGER,
+        facilityIds: new mongoose.Types.ObjectId(facility._id),
+      });
+
+      console.log("companyManager: ----------------", companyManager);
+      if (companyManager) {
+        const info = facility.isActive ? "activated" : "inactivated";
+        const infoTitle = facility.isActive ? "Activated" : "Inactivated";
+
+        const type = facility.isActive
+          ? NotificationRedirectionType.FACILITY_ACTIVATED
+          : NotificationRedirectionType.FACILITY_INACTIVATED;
+
+        const message = `The Facility - ${facility.name} has been ${info} also all the chillers under it are also inactivated. The log entries already entered will remain as they are, just they won't be a part of the calculations anymore.`;
+        const payload = {
+          senderId: null,
+          receiverId: companyManager._id,
+          title: `Facility ${infoTitle}`,
+          message: message,
+          type: type,
+          redirection: {
+            facilityId: facility._id,
+            type: type,
+          },
+        };
+
+        await this.notificationService.sendNotification(
+          payload.receiverId,
+          payload,
+        );
+      }
+
+      if (facilityManager) {
+        const message = `The Facility - ${facility.name} has been inactivated also all the chillers under it are also inactivated. The log entries already entered will remain as they are, just they won't be a part of the calculations anymore.`;
+        const payload = {
+          senderId: null,
+          receiverId: facilityManager._id,
+          title: "Facility Inactivated",
+          message: message,
+          type: NotificationRedirectionType.FACILITY_INACTIVATED,
+          redirection: {
+            facilityId: facility._id,
+            type: NotificationRedirectionType.FACILITY_INACTIVATED,
+          },
+        };
+
+        await this.notificationService.sendNotification(
+          payload.receiverId,
+          payload,
+        );
       }
 
       const message = isActive
@@ -1108,23 +1492,55 @@ export class FacilityService {
     }
   }
 
-  async findAllActiveChillers(dto: ActiveFacilities) {
+  async findAllActiveChillers(req: Request, dto: ActiveFacilities) {
     const companyId = dto.companyId;
+    console.log("dto.companyId: ", dto.companyId);
+    const findUser = await this.userModel.findOne({
+      _id: req["user"]["_id"],
+    });
 
     const existingCompany = await this.companyModel.findById(
       new mongoose.Types.ObjectId(companyId),
     );
 
-    if (!existingCompany) {
-      throw TypeExceptions.BadRequestCommonFunction(
-        RESPONSE_ERROR.COMPANY_NOT_FOUND,
-      );
-    }
+    // let companyId = existingCompany._id;
+    // if (!existingCompany) {
+    //   throw TypeExceptions.BadRequestCommonFunction(
+    //     RESPONSE_ERROR.COMPANY_NOT_FOUND
+    //   );
+    // }
+    if (
+      req["user"]["role"] == Role.CORPORATE_MANAGER ||
+      req["user"]["role"] == Role.FACILITY_MANAGER ||
+      req["user"]["role"] == Role.OPERATOR
+    ) {
+      if (!findUser.companyId) {
+        return [];
+      }
 
-    const activeFacilities = await this.facilityModel.find({
-      companyId: existingCompany._id,
-      isActive: true,
-    });
+      let facilityIds = [];
+      if (findUser.facilityIds && findUser.facilityIds.length) {
+        facilityIds = findUser.facilityIds.map(
+          (id) => new mongoose.Types.ObjectId(id),
+        );
+      }
+      console.log("facilityIds: ", facilityIds);
+      const assignFacilities = await this.facilityModel
+        .find({
+          companyId: existingCompany._id,
+          isActive: true,
+          _id: { $in: facilityIds },
+        })
+        .sort({ createdAt: -1 });
+      console.log(assignFacilities);
+      return assignFacilities;
+    }
+    const activeFacilities = await this.facilityModel
+      .find({
+        companyId: existingCompany._id,
+        isActive: true,
+      })
+      .sort({ createdAt: -1 });
 
     if (activeFacilities.length == 0) {
       throw TypeExceptions.BadRequestCommonFunction(

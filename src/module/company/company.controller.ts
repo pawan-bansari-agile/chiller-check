@@ -139,8 +139,9 @@ export class CompanyController {
   // @Public()
   @ApiBearerAuth()
   @ResponseMessage(COMPANY.COMPANY_FOUND)
-  findOne(@Param("id") id: string) {
-    return this.companyService.findOne(id);
+  findOne(@Param("id") id: string, @Req() req) {
+    const loggedUserId = req["user"]["_id"];
+    return this.companyService.findOne(id, loggedUserId);
   }
 
   // @Public()
@@ -158,8 +159,10 @@ export class CompanyController {
   async updateCompanyStatus(
     @Param("companyId") companyId: string, // Company ID from the URL parameter
     @Body() body: UpdateCompanyStatusDto, // Request body with new status
+    @Req() req,
   ) {
-    return this.companyService.updateStatus(companyId, body);
+    const loggedInUserId = req["user"]["_id"];
+    return this.companyService.updateStatus(companyId, body, loggedInUserId);
   }
 
   // @Public()
@@ -198,7 +201,7 @@ export class CompanyController {
     description: "Forbidden: Only an Admin can list company!",
   })
   @ResponseMessage(COMPANY.ACTIVE_COMPANY_LISTED)
-  findAllActiveChillers() {
-    return this.companyService.findAllActiveCompany();
+  findAllActiveChillers(@Req() req: Request) {
+    return this.companyService.findAllActiveCompany(req);
   }
 }

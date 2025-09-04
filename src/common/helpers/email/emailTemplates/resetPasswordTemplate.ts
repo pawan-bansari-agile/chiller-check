@@ -5,7 +5,7 @@ export const resetPasswordTemplate = (
 <html lang="en">
 
 <head>
-    <title>Chiller check</title>
+    <title>Chiller Check</title>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -92,65 +92,58 @@ export const resetPasswordTemplate = (
                 <td style="padding:30px 50px 40px;">
                     <table style="border: 0;border-spacing:0;">
                         <tr>
-                            <td style="justify-content: center;display: flex;font-weight: 700;font-size: 20px;color: #101112;line-height: 25px;">Reset Your Password</td>
-                        </tr>
-                        <tr>
-                            <td>
-                                <hr>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 700;font-size: 16px;color: #101112;line-height: 25px;text-align: center;">Hi ${name},</td>
+                            <td style="font-weight: 400;font-size: 16px;color: #333333;line-height: 50px;text-align: left;">Hi ${name},</td>
                         </tr> 
                         <tr>
-                            <td>
-                                <br/>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;text-align: center;">We are sending this email because you requested a password reset. Click on reset password button below to create a new password.</td>
+                            <td style="font-weight: 400;font-size: 16px;color: #333333;line-height: 25px;text-align: left;">You can now set your password by clicking the button below.
+</td>
                         </tr>
                         <tr>
                             <td>
                                 <br/>
                             </td>
-                        </tr>
-                        <tr>
-                            <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;text-align: center;">If you didn't request a password reset, please ignore this email.</td>
                         </tr>
                     </table>
                 </td>
             </tr>
             <tr>
-                <td style="text-align: center;padding: 0 50px;">
-                    <a href=${redirectUrl} target="_blank" style="display: inline-block;background-color: #44749C;border-radius: 8px;font-weight: 600;font-size: 18px;
-            text-align: center;color: #FFFFFF;text-decoration: none;padding: 16px 10px;width: 100%;line-height: 22px;">
+                <td style="text-align: center;padding-bottom: 35px;">
+                    <a href=${redirectUrl} target="_blank" style="display: inline-block;background-color: #000abc;border-radius: 30px;font-weight: 700;font-size: 14px;
+            text-align: center;color: #FFFFFF;text-decoration: none;padding: 6.5px 35px;">
                         Reset Password
                     </a>
                 </td>
             </tr>
             <tr>
-                <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;padding-top:15px;text-align: center;">
-                    If you have any questions, feel free to contact us at <a href="${process.env.SUPPORT_EMAIL}" style="text-decoration: underline; color: blue;">${process.env.SUPPORT_EMAIL}</a>.
-                </td>
+            <td style="font-weight: 400;font-size: 16px;color: #333333;line-height: 25px;text-align: left;padding: 0 50px 20px;">After you have set your password, you would be able to login & use the system.
+</td>
+            </tr>
+            <tr>
+            <td style="font-weight: 400;font-size: 16px;color: #333333;line-height: 25px;text-align: left;padding: 0 50px 20px;">Please note that the option to set your password will expire within 24 hours.
+</td>
+            </tr>
+            <tr>
+            <td style="font-weight: 400;font-size: 16px;color: #333333;line-height: 25px;text-align: left;padding: 0 50px 0">If the password link has expired, you can reach out to your superior to generate a new password link & share it. Else email to us at support@chillercheck.com
+</td>
             </tr>
             <tr>
                 <td style="padding:45px 50px 60px;">
-                    <table style="border: 0;border-spacing:0;">
+                    <table style="border: 0; border-spacing: 0;">
                         <tr>
-                            <td style="font-weight: 600;font-size: 17px;color: #404040;line-height: 23px;">Thanks, <span
-                                    style="display: block;">The Chiller check Team</span></td>
+                            <td style="font-weight: 600; font-size: 17px; color: #404040; line-height: 23px;">
+                                Thanks, <span style="display: block;">The Chiller Check Team</span>
+                            </td>
                         </tr>
                     </table>
                 </td>
             </tr>
             <tr>
-                <td style="padding:0 ;">
-                    <table style="border: 0;border-spacing:0;width: 100%;text-align: center;">
+                <td style="padding:0;">
+                    <table style="border: 0; border-spacing: 0; width: 100%; text-align: center;">
                         <tr>
-                            <td
-                                style="padding:10px;background-color: #13132A;font-weight: 400;font-size: 13px;letter-spacing: 0.5px;color: #FFFFFF;">
-                                Copyright ©2025 Chiller check | All Rights Reserved </td>
+                            <td style="padding:10px; background-color: #13132A; font-weight: 400; font-size: 13px; letter-spacing: 0.5px; color: #FFFFFF;">
+                                Copyright ©2025 Chiller Check | All Rights Reserved
+                            </td>
                         </tr>
                     </table>
                 </td>

@@ -65,10 +65,10 @@ export function generateTimelineDescription(
     }
 
     case "New Log Entry":
-      return `Log Entry ${params.logId}. Entry Notes: ${params.entryNotes || ""}. Updated By: ${params.updatedBy}`;
+      return `Log ID ${params.logId}. Entry Notes: ${params.entryNotes || ""}. Updated By: ${params.updatedBy}`;
 
     case "Log Edited":
-      return `Log Entry ${params.logId} at ${params.logCreatedAt} was edited with entry notes: "${params.entryNotes || ""}". Updated By: ${params.updatedBy}`;
+      return `Log ID ${params.logId} at ${params.logCreatedAt} was edited with entry notes: "${params.entryNotes || ""}". Updated By: ${params.updatedBy}`;
 
     case "Maintenance Entry Edited":
       return `Entry Notes: "${params.entryNotes || ""}". Updated By: ${params.updatedBy}`;
@@ -83,10 +83,10 @@ export function generateTimelineDescription(
       return `Inactivated By: ${params.updatedBy}`;
 
     case "New Bad Log Entry":
-      return `Bad Log Entry ${params.logId} was created. Entry Notes: "${params.entryNotes || ""}". Updated By: ${params.updatedBy}`;
+      return `Bad Log ID ${params.logId} was created. Entry Notes: "${params.entryNotes || ""}". Updated By: ${params.updatedBy}`;
 
     case "Bad Log Entry Edited":
-      return `Bad Log Entry ${params.logId} was edited. Entry Notes: "${params.entryNotes || ""}". Updated By: ${params.updatedBy}`;
+      return `Bad Log ID ${params.logId} was edited. Entry Notes: "${params.entryNotes || ""}". Updated By: ${params.updatedBy}`;
 
     case "Chiller Bulk Updated":
       return `The chiller configuration was updated. Param updated are: ${fieldDisplayNames["energyCost"]}. Updated By: ${params.updatedBy}`;

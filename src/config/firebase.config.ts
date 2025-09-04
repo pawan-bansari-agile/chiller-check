@@ -1,6 +1,6 @@
 import "dotenv/config";
-const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/gm, "\n");
-// console.log("privateKey: ", privateKey);
+// const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/gm, "\n");
+const { privateKey } = JSON.parse(process.env.FIREBASE_PRIVATE_KEY);
 const fireBaseConfig: unknown = {
   type: process.env.FIREBASE_TYPE,
   project_id: process.env.FIREBASE_PROJECT_ID,

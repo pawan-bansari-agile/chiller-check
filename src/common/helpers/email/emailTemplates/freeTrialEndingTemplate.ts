@@ -4,7 +4,7 @@ export const freeTrialEndingTemplate = (
 <html lang="en">
 
 <head>
-    <title>Chiller check</title>
+    <title>Chiller Check</title>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -98,25 +98,25 @@ export const freeTrialEndingTemplate = (
                         </tr>
                         <tr><td><hr></td></tr>
                         <tr>
-                            <td style="font-weight: 700; font-size: 16px; color: #101112; line-height: 25px; text-align: center;">
+                            <td style="font-weight: 700; font-size: 16px; color: #101112; line-height: 25px; text-align: left;">
                                 Hi ${managerFirstName},
                             </td>
                         </tr>
                         <tr><td><br/></td></tr>
                         <tr>
-                            <td style="font-weight: 400; font-size: 16px; color: #101112; line-height: 25px; text-align: center;">
+                            <td style="font-weight: 400; font-size: 16px; color: #101112; line-height: 25px; text-align: left;">
                                 Your company's 30-day free trial is ending <b>tomorrow</b>.
                             </td>
                         </tr>
                         <tr><td><br/></td></tr>
                         <tr>
-                            <td style="font-weight: 400; font-size: 16px; color: #101112; line-height: 25px; text-align: center;">
+                            <td style="font-weight: 400; font-size: 16px; color: #101112; line-height: 25px; text-align: left;">
                                 Please contact our admin to activate your account and continue using the system.
                             </td>
                         </tr>
                         <tr><td><br/></td></tr>
                         <tr>
-                            <td style="font-weight: 500; font-size: 16px; color: #101112; line-height: 25px; text-align: center;">
+                            <td style="font-weight: 500; font-size: 16px; color: #101112; line-height: 25px; text-align: left;">
                                 <b>Admin Contact:</b> <a href="mailto:${process.env.SUPPORT_EMAIL}" style="text-decoration: underline; color: blue;">${process.env.SUPPORT_EMAIL}</a>
                             </td>
                         </tr>
@@ -128,7 +128,7 @@ export const freeTrialEndingTemplate = (
                     <table style="border: 0; border-spacing: 0;">
                         <tr>
                             <td style="font-weight: 600; font-size: 17px; color: #404040; line-height: 23px;">
-                                Thanks, <span style="display: block;">The Chiller check Team</span>
+                                Thanks, <span style="display: block;">The Chiller Check Team</span>
                             </td>
                         </tr>
                     </table>
@@ -139,7 +139,7 @@ export const freeTrialEndingTemplate = (
                     <table style="border: 0; border-spacing: 0; width: 100%; text-align: center;">
                         <tr>
                             <td style="padding:10px; background-color: #13132A; font-weight: 400; font-size: 13px; letter-spacing: 0.5px; color: #FFFFFF;">
-                                Copyright ©2025 Chiller check | All Rights Reserved
+                                Copyright ©2025 Chiller Check | All Rights Reserved
                             </td>
                         </tr>
                     </table>

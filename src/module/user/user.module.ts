@@ -12,6 +12,12 @@ import { CommonService } from "src/common/services/common.service";
 import { Company, CompanySchema } from "src/common/schema/company.schema";
 import { Chiller, ChillerSchema } from "src/common/schema/chiller.schema";
 import { Facility, FacilitySchema } from "src/common/schema/facility.schema";
+import { Device, DeviceSchema } from "src/common/schema/device.schema";
+import {
+  Notification,
+  NotificationSchema,
+} from "src/common/schema/notification.schema";
+import { NotificationService } from "src/common/services/notification.service";
 // import { APP_GUARD } from '@nestjs/core';
 // import { UserAccessGuard } from 'src/security/auth/guards/user-module.guard';
 
@@ -22,6 +28,8 @@ import { Facility, FacilitySchema } from "src/common/schema/facility.schema";
     MongooseModule.forFeature([{ name: Chiller.name, schema: ChillerSchema }]),
     MongooseModule.forFeature([
       { name: Facility.name, schema: FacilitySchema },
+      { name: Notification.name, schema: NotificationSchema },
+      { name: Device.name, schema: DeviceSchema },
     ]),
     ImageUploadModule,
   ],
@@ -33,6 +41,7 @@ import { Facility, FacilitySchema } from "src/common/schema/facility.schema";
     PasswordGeneratorService,
     EmailService,
     CommonService,
+    NotificationService,
     // {
     //   provide: APP_GUARD,
     //   useClass: UserAccessGuard,

@@ -29,6 +29,22 @@ import { TimelineModule } from "./module/timeline/timeline.module";
 import { LogModule } from "./module/log/log.module";
 import { ScheduleModule } from "@nestjs/schedule";
 import { Company, CompanySchema } from "./common/schema/company.schema";
+import { MaintenanceRecordsModule } from "./module/maintenance-records/maintenance-records.module";
+import { ReportsModule } from "./module/reports/reports.module";
+import { NotificationModule } from "./module/notification/notification.module";
+import { GmailModule } from "./module/gmail/gmail.module";
+import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
+import { UserActionLogModule } from "./common/userActionLog/userActionLog.module";
+import { JwtService } from "@nestjs/jwt";
+import { UserActionLogService } from "./common/userActionLog/userActionLog.service";
+import {
+  UserActionLog,
+  UserActionLogSchema,
+} from "./common/schema/userActionLog.schema";
+import { DashboardModule } from "./module/dashboard/dashboard.module";
+import { AlertCronModule } from "./crons/alertsCrons.module";
+import { ServeStaticModule } from "@nestjs/serve-static";
+import { join } from "path";
 
 @Module({
   imports: [
@@ -37,6 +53,7 @@ import { Company, CompanySchema } from "./common/schema/company.schema";
       { name: User.name, schema: UserSchema },
       { name: Device.name, schema: DeviceSchema },
       { name: Company.name, schema: CompanySchema },
+      { name: UserActionLog.name, schema: UserActionLogSchema },
     ]),
     ConfigModule.forRoot({
       load: [AppConfiguration, DatabaseConfiguration, AuthConfiguration],
@@ -56,6 +73,37 @@ import { Company, CompanySchema } from "./common/schema/company.schema";
     ProblemSolutionModule,
     TimelineModule,
     LogModule,
+    MaintenanceRecordsModule,
+    ReportsModule,
+    NotificationModule,
+    GmailModule,
+    UserActionLogModule,
+    DashboardModule,
+    AlertCronModule,
+    ServeStaticModule.forRoot(
+      {
+        serveRoot: "/tmp-chiller-check",
+        rootPath: join(__dirname, "..", "./tmp-chiller-check"),
+        //exclude: ['/api*'],
+        serveStaticOptions: {
+          setHeaders: (res) => {
+            res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+            res.setHeader("Access-Control-Allow-Origin", "*");
+          },
+        },
+      },
+      {
+        serveRoot: "/chiller-check",
+        rootPath: join(__dirname, "..", "./chiller-check"),
+        //exclude: ['/api*'],
+        serveStaticOptions: {
+          setHeaders: (res) => {
+            res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+            res.setHeader("Access-Control-Allow-Origin", "*");
+          },
+        },
+      },
+    ),
   ],
   providers: [
     {
@@ -74,11 +122,17 @@ import { Company, CompanySchema } from "./common/schema/company.schema";
       provide: APP_INTERCEPTOR,
       useClass: TransformInterceptor,
     },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor, // Add your interceptor class here
+    },
     // {
     //   provide: APP_GUARD,
     //   useClass: UserAccessGuard,
     // },
     CryptoService,
+    JwtService,
+    UserActionLogService,
   ],
 })
 export class AppModule {

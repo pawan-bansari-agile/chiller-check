@@ -3,8 +3,10 @@ import { InjectModel } from "@nestjs/mongoose";
 import mongoose, { Model } from "mongoose";
 import {
   AppEnvironment,
+  NotificationRedirectionType,
   Role,
   UploadFolderEnum,
+  userRoleName,
 } from "src/common/constants/enum.constant";
 import { UpdateUserDto } from "src/common/dto/common.dto";
 import {
@@ -35,6 +37,8 @@ import { Chiller, ChillerDocument } from "src/common/schema/chiller.schema";
 import { accountStatusTemplate } from "src/common/helpers/email/emailTemplates/accountStatusTemplate";
 import { Facility, FacilityDocument } from "src/common/schema/facility.schema";
 import { assignmentNotificationTemplate } from "src/common/helpers/email/emailTemplates/assignmentNotificationTemplate";
+import { NotificationService } from "src/common/services/notification.service";
+import { congratulationTemplateLocal } from "../image-upload/email-template/congratulation-template-local";
 // import { AuthService } from 'src/security/auth/auth.service';
 dotenv.config();
 
@@ -53,11 +57,11 @@ export class UserService {
     private emailService: EmailService,
     private readonly commonService: CommonService,
     private readonly configService: ConfigService,
+    private readonly notificationService: NotificationService,
     // private readonly authService: AuthService,
   ) {}
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async createUser(dto: CreateUserDto, req) {
+  async createUser(dto: CreateUserDto) {
     try {
       const existingUser = await this.userModel.findOne({ email: dto.email });
       if (existingUser) {
@@ -188,6 +192,23 @@ export class UserService {
           );
 
           const companyName = company.name;
+          const message = `The Company - ${companyName} has been assigned to you. You can now manage the data under this company & its users.`;
+          const payload = {
+            senderId: null,
+            receiverId: user._id,
+            title: "Company Assigned",
+            message: message,
+            type: NotificationRedirectionType.COMPANY_ASSIGNED,
+            redirection: {
+              companyId: dto.companyId,
+              type: NotificationRedirectionType.COMPANY_ASSIGNED,
+            },
+          };
+
+          await this.notificationService.sendNotification(
+            payload.receiverId,
+            payload,
+          );
 
           const html = assignmentNotificationTemplate(
             userName,
@@ -214,6 +235,22 @@ export class UserService {
           facilities.map((f) => {
             facilityNames.push(f.name);
           });
+          const message = `The Facility - ${Array.isArray(facilityNames) && facilityNames.length > 1 ? "multiple Facilities" : "a new Facility"} has been assigned to you. You can now manage the data under this facility & its users.`;
+          const payload = {
+            senderId: null,
+            receiverId: user._id,
+            title: "Facility Assigned",
+            message: message,
+            type: NotificationRedirectionType.FACILITY_ASSIGNED,
+            redirection: {
+              type: NotificationRedirectionType.FACILITY_ASSIGNED,
+            },
+          };
+
+          await this.notificationService.sendNotification(
+            payload.receiverId,
+            payload,
+          );
 
           const html = assignmentNotificationTemplate(
             userName,
@@ -241,6 +278,23 @@ export class UserService {
             chillerNames.push(`${c.ChillerNo} ${c.serialNumber}`);
           });
 
+          const message = `A Chiller - ${Array.isArray(chillerNames) && chillerNames.length > 1 ? "multiple Chillers" : "a new Chiller"} has been assigned to you. You can now manage the data under this chiller.`;
+          const payload = {
+            senderId: null,
+            receiverId: user._id,
+            title: "Chiller Assigned",
+            message: message,
+            type: NotificationRedirectionType.CHILLER_ASSIGNED,
+            redirection: {
+              type: NotificationRedirectionType.CHILLER_ASSIGNED,
+            },
+          };
+
+          await this.notificationService.sendNotification(
+            payload.receiverId,
+            payload,
+          );
+
           const html = assignmentNotificationTemplate(
             userName,
             user.role,
@@ -259,7 +313,7 @@ export class UserService {
       if (dto.role == Role.SUB_ADMIN) {
         roleText = "Sub Admin";
       } else if (dto.role == Role.CORPORATE_MANAGER) {
-        roleText = "Corporate Manager";
+        roleText = "Company manager";
       } else if (dto.role == Role.FACILITY_MANAGER) {
         roleText = "Facility Manager";
       } else if (dto.role == Role.OPERATOR) {
@@ -284,6 +338,12 @@ export class UserService {
 
         return user;
       } else {
+        const htmlLocal = congratulationTemplateLocal(
+          `${process.env.ADMIN_URL}/set-password/${passwordResetToken}`,
+          `${roleText}`,
+          `${dto.firstName} ${dto.lastName}`,
+          `${email}`,
+        );
         const emailTemplate = await this.emailService.emailSender({
           to: email,
           subject: "Welcome to Chiller Portal",
@@ -291,7 +351,12 @@ export class UserService {
         });
 
         console.log("✌️emailTemplate --->", emailTemplate);
-        return { user, emailTemplate };
+        return {
+          user,
+          emailTemplate,
+          htmlLocal,
+          link: `${process.env.ADMIN_URL}/set-password/${passwordResetToken}`,
+        };
       }
 
       // return user;
@@ -815,6 +880,43 @@ export class UserService {
       }
 
       await user.save();
+
+      const company = await this.companyModel.findOne({ _id: user.companyId });
+
+      let companyName = "";
+
+      if (company) {
+        companyName = company.name ? company.name : "";
+      }
+
+      const adminAndSubAdmins = await this.userModel.find({
+        role: { $in: [Role.ADMIN, Role.SUB_ADMIN] },
+      });
+
+      if (adminAndSubAdmins) {
+        adminAndSubAdmins.map(async (u) => {
+          const userRoleText = userRoleName(user.role);
+          const adminRoleText = userRoleName(loggedInUser.role);
+          const notificationMessage = `The ${companyName} - ${userRoleText} - '${user.firstName} ${user.lastName}''s account has been updated. The update was done by ${adminRoleText} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`;
+          const payload = {
+            senderId: null,
+            receiverId: u._id,
+            title: "User Updated",
+            message: notificationMessage,
+            type: NotificationRedirectionType.USER_UPDATED,
+            redirection: {
+              userId: user._id,
+              type: NotificationRedirectionType.USER_UPDATED,
+            },
+          };
+
+          await this.notificationService.sendNotification(
+            payload.receiverId,
+            payload,
+          );
+        });
+      }
+
       // Save the updated user
 
       let updatedByAdmin: boolean = false;
@@ -860,48 +962,19 @@ export class UserService {
         isDeleted: false,
         _id: objectId,
       };
+      // const userExist = await this.userModel.findOne({ id: objectId });
+      const userExist = await this.userModel.findById(objectId);
+      console.log("userExist: ", userExist);
+      const programAlert = userExist.alerts?.logs?.find(
+        (log) => log.type === "program",
+      );
 
-      // const loggedInUserRole = loggedInUser.role;
-
-      // if (loggedInUserRole === Role.CORPORATE_MANAGER) {
-      //   // Get all facility IDs under corporate manager's company
-      //   const company = await this.companyModel.findOne({
-      //     _id: loggedInUser.companyId,
-      //     isDeleted: false,
-      //   });
-
-      //   if (!company) {
-      //     throw TypeExceptions.BadRequestCommonFunction(
-      //       RESPONSE_ERROR.COMPANY_NOT_FOUND,
-      //     );
-      //   }
-
-      //   const facilities = await this.facilityModel.find({
-      //     companyId: company._id,
-      //     isDeleted: false,
-      //   });
-
-      //   const facilityIds = facilities.map((fac) => fac._id);
-
-      //   // Allow access only if target user is a facilityManager/operator and assigned under the company facilities
-      //   matchObj.$or = [
-      //     {
-      //       role: "facilityManager",
-      //       facilityIds: { $in: facilityIds },
-      //     },
-      //     {
-      //       role: "operator",
-      //       facilityIds: { $in: facilityIds },
-      //     },
-      //   ];
-      // } else if (loggedInUser.role === Role.FACILITY_MANAGER) {
-      //   // Restrict to operator users under the manager’s facilities
-      //   const facilityIds = loggedInUser.facilityIds || [];
-
-      //   matchObj.role = "operator";
-      //   matchObj.facilityIds = { $in: facilityIds };
-      // }
-
+      const facilityIds = (programAlert?.facilityIds || []).map(
+        (id) => new mongoose.Types.ObjectId(id),
+      );
+      const operatorIds = (programAlert?.operatorIds || []).map(
+        (id) => new mongoose.Types.ObjectId(id),
+      );
       const pipeline = [];
 
       pipeline.push({ $match: matchObj });
@@ -930,6 +1003,39 @@ export class UserService {
           localField: "facilityIds",
           foreignField: "_id",
           as: "facilities",
+        },
+      });
+
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.FACILITY,
+          let: { facilityIdsFromAlert: facilityIds },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $in: ["$_id", "$$facilityIdsFromAlert"],
+                },
+              },
+            },
+          ],
+          as: "alertFacilities",
+        },
+      });
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.USERS,
+          let: { operatorIdsAlert: operatorIds },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $in: ["$_id", "$$operatorIdsAlert"],
+                },
+              },
+            },
+          ],
+          as: "alertOperators",
         },
       });
 
@@ -1059,6 +1165,56 @@ export class UserService {
         },
       });
 
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.LOGS,
+          let: { chillerIds: "$chillerIds" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $in: ["$chillerId", "$$chillerIds"] },
+                    { $eq: ["$isDeleted", false] },
+                  ],
+                },
+              },
+            },
+            { $sort: { readingDateUTC: -1 } },
+            {
+              $group: {
+                _id: "$chillerId",
+                latestLog: { $first: "$$ROOT" },
+              },
+            },
+          ],
+          as: "latestLogs",
+        },
+      });
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.USERS,
+          let: { updatedByIds: "$latestLogs.latestLog.updatedBy" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $in: ["$_id", "$$updatedByIds"],
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                firstName: 1,
+                lastName: 1,
+              },
+            },
+          ],
+          as: "latestLogUpdaters",
+        },
+      });
+
       // Add facilityName and totalOperators to each chiller
       pipeline.push({
         $addFields: {
@@ -1090,9 +1246,52 @@ export class UserService {
                           input: "$facilityOperators",
                           as: "op",
                           cond: {
-                            // Check if operator's chillerIds contains the current chiller's _id
                             $in: ["$$chiller._id", "$$op.chillerIds"],
                           },
+                        },
+                      },
+                    },
+                    latestLog: {
+                      $let: {
+                        vars: {
+                          matchedLog: {
+                            $arrayElemAt: [
+                              {
+                                $filter: {
+                                  input: "$latestLogs",
+                                  as: "logEntry",
+                                  cond: {
+                                    $eq: ["$$logEntry._id", "$$chiller._id"],
+                                  },
+                                },
+                              },
+                              0,
+                            ],
+                          },
+                        },
+                        in: {
+                          $mergeObjects: [
+                            "$$matchedLog.latestLog",
+                            {
+                              updatedByUser: {
+                                $arrayElemAt: [
+                                  {
+                                    $filter: {
+                                      input: "$latestLogUpdaters",
+                                      as: "user",
+                                      cond: {
+                                        $eq: [
+                                          "$$user._id",
+                                          "$$matchedLog.latestLog.updatedBy",
+                                        ],
+                                      },
+                                    },
+                                  },
+                                  0,
+                                ],
+                              },
+                            },
+                          ],
                         },
                       },
                     },
@@ -1171,16 +1370,139 @@ export class UserService {
           failedLoginAttempts: 1,
           lastFailedLoginAttempt: 1,
           permissions: 1,
+          alertFacilities: 1,
+          alertOperators: 1,
           alerts: 1,
         },
       });
 
+      // pipeline.push({
+      //   $lookup: {
+      //     from: TABLE_NAMES.LOGS,
+      //     let: { chillerId: '$_id' },
+      //     pipeline: [
+      //       {
+      //         $match: {
+      //           $expr: {
+      //             $eq: ['$chillerId', '$$chillerId'],
+      //           },
+      //         },
+      //       },
+      //       { $sort: { readingDateUTC: -1 } },
+      //       { $limit: 1 },
+      //     ],
+      //     as: 'latestLog',
+      //   },
+      // });
+
+      // pipeline.push({
+      //   $addFields: {
+      //     latestLog: { $arrayElemAt: ['$latestLog', 0] },
+      //   },
+      // });
+
+      // pipeline.push({
+      //   $unwind: {
+      //     path: '$latestLog',
+      //     preserveNullAndEmptyArrays: true,
+      //   },
+      // });
+
       const user = await this.userModel.aggregate(pipeline);
+
       if (!user || user.length === 0) {
         throw AuthExceptions.AccountNotExist();
       }
 
-      return user[0];
+      const generalConditions = loggedInUser?.alerts?.general?.conditions || [];
+      console.log("✌️generalConditions --->", generalConditions);
+
+      const evaluateCondition = (
+        value: number,
+        operator: string,
+        threshold: number,
+      ): boolean => {
+        switch (operator) {
+          case ">":
+            return value > threshold;
+          case ">=":
+            return value >= threshold;
+          case "<":
+            return value < threshold;
+          case "<=":
+            return value <= threshold;
+          case "=":
+            return value === threshold;
+          default:
+            return false;
+        }
+      };
+
+      const getLossType = (
+        metric: string,
+        value: number,
+      ): "normal" | "warning" | "alert" => {
+        const condition = generalConditions.find((c) => c.metric === metric);
+        if (!condition) return "normal";
+
+        const { warning, alert } = condition;
+        if (evaluateCondition(value, alert.operator, alert.threshold))
+          return "alert";
+        if (evaluateCondition(value, warning.operator, warning.threshold))
+          return "warning";
+        return "normal";
+      };
+
+      const userData = user[0];
+      // console.log('✌️userData --->', userData);
+
+      const formattedChillers = userData?.chillers.map((chiller) => {
+        const log = chiller?.latestLog;
+
+        // Remove latestLog from chiller object temporarily
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { latestLog: _, ...rest } = chiller;
+
+        // Conditionally construct the latestLog object if it exists
+        if (Object.keys(log).length) {
+          const enhancedLog = {
+            ...log,
+            effLoss: {
+              value: log.effLoss ?? 0,
+              type: getLossType("efficiencyLoss", log.effLoss ?? 0),
+            },
+            condAppLoss: {
+              value: log.condAppLoss ?? 0,
+              type: getLossType("condenserLoss", log.condAppLoss ?? 0),
+            },
+            evapAppLoss: {
+              value: log.evapAppLoss ?? 0,
+              type: getLossType("evaporatorLoss", log.evapAppLoss ?? 0),
+            },
+            nonCondLoss: {
+              value: log.nonCondLoss ?? 0,
+              type: getLossType("nonCondenserLoss", log.nonCondLoss ?? 0),
+            },
+            otherLoss: {
+              value: log.otherLoss ?? 0,
+              type: getLossType("otherLoss", log.otherLoss ?? 0),
+            },
+          };
+
+          return {
+            ...rest,
+            latestLog: enhancedLog,
+          };
+        }
+
+        // If no latest log, just return the base chiller data (no `latestLog` key)
+        return rest;
+      });
+
+      return {
+        ...userData,
+        chillers: formattedChillers,
+      };
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
@@ -1360,8 +1682,12 @@ export class UserService {
     }
   }
 
-  async updateUserStatus(dto: UpdateUserStatusDto) {
+  async updateUserStatus(dto: UpdateUserStatusDto, loggedInUserId: string) {
     try {
+      const loggedInUser = await this.userModel.findById(
+        new mongoose.Types.ObjectId(loggedInUserId),
+      );
+      console.log("✌️loggedInUser --->", loggedInUser);
       const { userId, isActive, shouldUnassign } = dto;
       const user = await this.userModel.findById(userId);
       if (!user || user.isDeleted) {
@@ -1376,15 +1702,52 @@ export class UserService {
 
       if (!isActive) {
         if (shouldUnassign) {
-          const companyId = user?.companyId;
-          if (companyId) {
-            await this.companyModel.findOneAndUpdate(
-              { _id: new mongoose.Types.ObjectId(companyId) },
-              { isAssign: false },
-            );
+          if (user.role == Role.CORPORATE_MANAGER) {
+            const companyId = user?.companyId;
+            if (companyId) {
+              await this.companyModel.findOneAndUpdate(
+                { _id: new mongoose.Types.ObjectId(companyId) },
+                { isAssign: false },
+              );
+            }
           }
           user.companyId = null;
           user.facilityIds = [];
+          user.chillerIds = [];
+        }
+
+        const company = await this.companyModel.findOne({
+          _id: user.companyId,
+        });
+
+        const adminAndSubAdmins = await this.userModel.find({
+          role: { $in: [Role.ADMIN, Role.SUB_ADMIN] },
+        });
+
+        if (adminAndSubAdmins && company) {
+          const adminRoleText = userRoleName(loggedInUser.role);
+          adminAndSubAdmins.map(async (u) => {
+            const userRoleText = userRoleName(user.role);
+
+            const companyName = company?.name || "";
+            const message = `The ${companyName} - ${userRoleText} - '${user.firstName} ${user.lastName}''s account has been inactivated. The inactivation was done by ${adminRoleText} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`;
+            const payload = {
+              senderId: null,
+              receiverId: u._id,
+              title: "User Inactivated",
+              message: message,
+              type: NotificationRedirectionType.USER_INACTIVATED,
+              redirection: {
+                userId: user._id,
+                type: NotificationRedirectionType.USER_INACTIVATED,
+              },
+            };
+
+            await this.notificationService.sendNotification(
+              payload.receiverId,
+              payload,
+            );
+          });
         }
       }
       user.isProfileUpdated = true;
@@ -1392,14 +1755,18 @@ export class UserService {
       await user.save();
 
       const emailHtml = isActive
-        ? accountStatusTemplate(true, { firstName: user.firstName }, user.role)
+        ? accountStatusTemplate(
+            true,
+            { firstName: `${user.firstName} ${user.lastName}` },
+            user.role,
+          )
         : accountStatusTemplate(
             false,
-            { firstName: user.firstName },
+            { firstName: `${user.firstName} ${user.lastName}` },
             user.role,
           );
 
-      const subject = isActive ? "Account Activated" : "Account Deactivated";
+      const subject = isActive ? "Account Activated" : "Account Inactivated";
 
       // Send Email
       await this.emailService.emailSender({

@@ -14,6 +14,12 @@ export class Logs {
   @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "Chiller" })
   chillerId: mongoose.Types.ObjectId;
 
+  @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "Company" })
+  companyId: mongoose.Types.ObjectId;
+
+  @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "Facility" })
+  facilityId: mongoose.Types.ObjectId;
+
   @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "User" })
   userId: mongoose.Types.ObjectId;
 
@@ -253,6 +259,12 @@ export class Logs {
 
   @Prop({ default: false })
   isDeleted: boolean;
+
+  @Prop()
+  effLossAtFullLoad: number;
+
+  @Prop({ required: true, default: false })
+  isLogManual: boolean;
 }
 
 export const LogsSchema = SchemaFactory.createForClass(Logs);

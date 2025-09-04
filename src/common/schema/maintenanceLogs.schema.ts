@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { TABLE_NAMES } from "../constants/table-name.constant";
 import mongoose from "mongoose";
 
-export type LogsDocument = Logs &
+export type MaintenanceDocument = MaintenanceRecordsLogs &
   Document & { createdAt: Date; updatedAt: Date };
 
 @Schema({
@@ -10,7 +10,13 @@ export type LogsDocument = Logs &
   timestamps: true,
   versionKey: false,
 })
-export class Logs {
+export class MaintenanceRecordsLogs {
+  @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "Company" })
+  companyId: mongoose.Types.ObjectId;
+
+  @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "Facility" })
+  facilityId: mongoose.Types.ObjectId;
+
   @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "Chiller" })
   chillerId: mongoose.Types.ObjectId;
 
@@ -21,7 +27,7 @@ export class Logs {
   maintenanceCategory: string;
 
   @Prop()
-  maintenanceDate: number;
+  maintenanceDate: string;
 
   @Prop()
   maintDescription: string;
@@ -30,19 +36,36 @@ export class Logs {
   maintQuantity: number;
 
   @Prop()
+  purgeReading: number;
+
+  @Prop()
   comments: string;
 
   @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "User" })
-  updateBy: mongoose.Types.ObjectId;
+  createdBy: mongoose.Types.ObjectId;
 
-  @Prop()
-  useMaintDesc: string;
+  @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "User" })
+  updatedBy: mongoose.Types.ObjectId;
 
-  @Prop()
-  useMaintQuantity: number;
+  // @Prop()
+  // useMaintDesc: string;
+
+  // @Prop()
+  // useMaintQuantity: number;
 
   @Prop()
   fileName: string;
+
+  @Prop()
+  fileRealName: string;
+
+  @Prop()
+  fileSize: number;
+
+  @Prop({ default: false })
+  isDeleted: boolean;
 }
 
-export const LogsSchema = SchemaFactory.createForClass(Logs);
+export const MaintenanceRecordsLogsSchema = SchemaFactory.createForClass(
+  MaintenanceRecordsLogs,
+);

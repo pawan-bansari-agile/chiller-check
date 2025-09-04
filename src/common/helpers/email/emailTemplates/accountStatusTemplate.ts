@@ -9,45 +9,39 @@ export const accountStatusTemplate = (
   const logoUrl = process.env.LOGO_URL || "";
 
   const getRoleBasedInstruction = (): string => {
+    let baseMessage = `Your account has been <b>inactivated</b>. Your data isn't lost but you won't be able to access it unless the account is activated back.<br/><br/> Please contact our system admin at <a href="mailto:${supportEmail}" style="text-decoration: underline; color: blue;">${supportEmail}</a> if you want to have the account activated back.`;
     if (isActive) {
-      return "Your account has been <b>activated</b>. You may now log in.";
+      baseMessage = `Your account has been activated back. You can now login into the system by clicking on the login button below. <br/><br/>  
+      <tr>
+                <td style="text-align: center;padding-bottom: 0px;">
+                    <a href='${process.env.ADMIN_URL}/login' target="_blank" style="display: inline-block;background-color: #000abc;border-radius: 30px;font-weight: 700;font-size: 14px;
+            text-align: center;color: #FFFFFF;text-decoration: none;padding: 6.5px 35px;">
+                        Login
+                    </a>
+                </td>
+            </tr>`;
     }
-
-    const baseMessage =
-      "Your account has been <b>inactivated</b>. Your data isn't lost but you won't be able to access it unless the account is activated back.<br/><br/>";
 
     switch (role) {
       case Role.CORPORATE_MANAGER:
       case Role.SUB_ADMIN:
-        return (
-          baseMessage +
-          `Please contact our system admin at <a href="mailto:${supportEmail}" style="text-decoration: underline; color: blue;">${supportEmail}</a> if you want to have the account activated back.`
-        );
+        return baseMessage;
 
       case Role.FACILITY_MANAGER:
-        return (
-          baseMessage +
-          `Please contact our system admin at <a href="mailto:${supportEmail}" style="text-decoration: underline; color: blue;">${supportEmail}</a> or reach out to your superior (Company Manager) if you want to have the account activated back.`
-        );
+        return baseMessage;
 
       case Role.OPERATOR:
-        return (
-          baseMessage +
-          `Please contact our system admin at <a href="mailto:${supportEmail}" style="text-decoration: underline; color: blue;">${supportEmail}</a> or reach out to your superior (Company Manager / Facility Manager) if you want to have the account activated back.`
-        );
+        return baseMessage;
 
       default:
-        return (
-          baseMessage +
-          `Please contact our system admin at <a href="mailto:${supportEmail}" style="text-decoration: underline; color: blue;">${supportEmail}</a> if you want to have the account activated back.`
-        );
+        return baseMessage;
     }
   };
   return `<!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <title>Chiller check</title>
+    <title>Chiller Check</title>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -122,69 +116,75 @@ export const accountStatusTemplate = (
 
 <body style="font-family: 'SF Pro Display';font-weight: 400;background-color: #EDEFF2;margin:0;">
     <div style="max-width:800px;margin: 0 auto;background-color: #ffffff;">
-        <table style="border: 0;border-spacing: 0;width: 100%;">
-            <tr>
-                <td style="text-align: center;max-height: 75px;">
-                    <a href="javascript:void(0)" target="_blank" style="display: inline-block;padding: 22px 0px;">
-                        <img src="${logoUrl}" alt="logo"
-                            style="width:100%;height:45px">
-                    </a>
-                </td>
-            </tr>
-            <tr>
-                <td style="padding:30px 50px 40px;">
-                    <table style="border: 0;border-spacing:0;">
-                        <tr>
-                            <td style="justify-content: center;display: flex;font-weight: 700;font-size: 20px;color: #101112;line-height: 25px;">
-                                Account Status Update
-                            </td>
-                        </tr>
-                        <tr><td><hr></td></tr>
-                        <tr>
-                            <td style="font-weight: 700;font-size: 16px;color: #101112;line-height: 25px;text-align: center;">
-                                Hi ${user.firstName},
-                            </td>
-                        </tr>
-                        <tr><td><br/></td></tr>
-                        <tr>
-                            <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;text-align: center;">
-                               ${getRoleBasedInstruction()}
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-            <tr>
-                <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;padding-top:15px;text-align: center;">
-                    Please contact our system admin at <a href="mailto:${supportEmail}" style="text-decoration: underline; color: blue;">
-                        ${supportEmail}
-                    </a>. if you want to have the account activated back.
+        <table style="border: 0; border-spacing: 0; width: 100%; font-family: Arial, sans-serif;">
+    <tr>
+        <td style="text-align: center; max-height: 75px; padding: 22px 0;">
+            <a href="javascript:void(0)" target="_blank" style="display: inline-block;">
+                <img src="${logoUrl}" alt="logo" style="width: auto; height: 45px;" />
+            </a>
+        </td>
+    </tr>
 
-                </td>
-            </tr>
-            <tr>
-                <td style="padding:45px 50px 60px;">
-                    <table style="border: 0;border-spacing:0;">
-                        <tr>
-                            <td style="font-weight: 600;font-size: 17px;color: #404040;line-height: 23px;">
-                                Thanks, <span style="display: block;">The Chiller check Team</span>
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-            <tr>
-                <td style="padding:0 ;">
-                    <table style="border: 0;border-spacing:0;width: 100%;text-align: center;">
-                        <tr>
-                            <td style="padding:10px;background-color: #13132A;font-weight: 400;font-size: 13px;letter-spacing: 0.5px;color: #FFFFFF;">
-                                Copyright ©2025 Chiller check | All Rights Reserved
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-        </table>
+    <tr>
+        <td style="padding: 30px 50px 0px;">
+            <table style="border: 0; border-spacing: 0; width: 100%;">
+                <tr>
+                    <td
+                        style="font-weight: 700; font-size: 20px; color: #101112; line-height: 25px; padding-bottom: 30px; border-bottom: 1px solid #00a86b;">
+                        Account Status Update
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="height: 30px;"></td>
+                </tr>
+
+                <tr>
+                    <td style="font-weight: 700; font-size: 16px; color: #101112; line-height: 25px; text-align: left;">
+                        Hi ${user.firstName},
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="height: 15px;"></td>
+                </tr>
+
+                <tr>
+                    <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;">
+                        ${getRoleBasedInstruction()}
+                    </td>
+                </tr>
+ <tr><td style="height: 30px;"></td></tr>
+
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="padding: 40px 50px 30px;">
+      <table style="border: 0; border-spacing: 0;">
+        <tr>
+          <td style="font-weight: 600; font-size: 17px; color: #404040; line-height: 23px; text-align: left;">
+            Thanks,<br />
+            <span style="display: block;">The Chiller Check Team</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <td style="padding: 0;">
+      <table style="border: 0; border-spacing: 0; width: 100%; text-align: center;">
+        <tr>
+          <td style="padding: 10px; background-color: #13132A; font-weight: 400; font-size: 13px; letter-spacing: 0.5px; color: #FFFFFF;">
+            Copyright ©2025 Chiller Check | All Rights Reserved
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
     </div>
 </body>
 

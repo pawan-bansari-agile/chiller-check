@@ -7,6 +7,12 @@ import { Facility, FacilitySchema } from "src/common/schema/facility.schema";
 import { Chiller, ChillerSchema } from "src/common/schema/chiller.schema";
 import { User, UserSchema } from "src/common/schema/user.schema";
 import { EmailService } from "src/common/helpers/email/email.service";
+import { NotificationService } from "src/common/services/notification.service";
+import {
+  Notification,
+  NotificationSchema,
+} from "src/common/schema/notification.schema";
+import { Device, DeviceSchema } from "src/common/schema/device.schema";
 
 @Module({
   imports: [
@@ -15,9 +21,11 @@ import { EmailService } from "src/common/helpers/email/email.service";
       { name: Facility.name, schema: FacilitySchema },
       { name: Chiller.name, schema: ChillerSchema },
       { name: User.name, schema: UserSchema },
+      { name: Notification.name, schema: NotificationSchema },
+      { name: Device.name, schema: DeviceSchema },
     ]),
   ],
   controllers: [FacilityController],
-  providers: [FacilityService, EmailService],
+  providers: [FacilityService, EmailService, NotificationService],
 })
 export class FacilityModule {}

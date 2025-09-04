@@ -32,6 +32,9 @@ export class Chiller {
   ChillerNo: string;
 
   @Prop()
+  ChillerNumber: string;
+
+  @Prop()
   weeklyHours: number;
 
   @Prop()
@@ -180,6 +183,9 @@ export class Chiller {
 
   @Prop()
   useLoad: boolean;
+
+  @Prop()
+  emissionFactor: number;
 }
 
 export const ChillerSchema = SchemaFactory.createForClass(Chiller);

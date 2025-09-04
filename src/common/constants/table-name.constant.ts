@@ -12,4 +12,10 @@ export const TABLE_NAMES = {
   MAINTENANCE_LOGS: "maintenanceLogs",
   BAD_LOGS: "badLogs",
   SCHEDULE_JOBS: "ScheduledJob",
+  REPORTS: "reports",
+  NOTIFICAIONS: "notifications",
+  USER_ACTION_LOG: "userActionLog",
+  HIST_CHILL_PERFORMANCE: "histChillerPerformance",
+  HIST_FACILITY_PERFORMANCE: "histLocationPerformance",
+  HIST_COMPANY_PERFORMANCE: "histCompanyPerformance",
 };

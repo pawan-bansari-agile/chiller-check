@@ -10,12 +10,19 @@ import mongoose, { FilterQuery, Model } from "mongoose";
 import {
   AMPERAGE_CHOICE,
   CHILLER_STATUS,
+  ChillerStatus,
   CompanyStatus,
   MEASUREMENT_UNITS,
+  NotificationRedirectionType,
   REFRIGERANT_TYPE,
   Role,
+  userRoleName,
 } from "src/common/constants/enum.constant";
-import { CustomError, TypeExceptions } from "src/common/helpers/exceptions";
+import {
+  AuthExceptions,
+  CustomError,
+  TypeExceptions,
+} from "src/common/helpers/exceptions";
 import { InjectModel } from "@nestjs/mongoose";
 import { Chiller, ChillerDocument } from "src/common/schema/chiller.schema";
 import { Facility } from "src/common/schema/facility.schema";
@@ -31,6 +38,16 @@ import { EmailService } from "src/common/helpers/email/email.service";
 import { generateTimelineDescription } from "src/common/helpers/timelineDescriptions/description.generator";
 import { Timeline } from "src/common/schema/timeline.schema";
 import { SchedulerService } from "src/common/scheduler/scheduler.service";
+import { NotificationService } from "src/common/services/notification.service";
+import { LogRecordHelper } from "src/common/helpers/logs/log.helper";
+import { Logs } from "src/common/schema/logs.schema";
+import { ProblemAndSolutions } from "src/common/schema/problemAndSolutions.schema";
+import * as dayjs from "dayjs";
+import * as utc from "dayjs/plugin/utc";
+import * as timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 @Injectable()
 export class ChillerService {
@@ -40,8 +57,12 @@ export class ChillerService {
     @InjectModel(Company.name) private readonly companyModel: Model<Company>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Timeline.name) private readonly timelineModel: Model<Timeline>,
+    @InjectModel(Logs.name) private readonly logsModel: Model<Logs>,
+    @InjectModel(ProblemAndSolutions.name)
+    private readonly problemSolutionModel: Model<ProblemAndSolutions>,
     private emailService: EmailService,
     private schedulerService: SchedulerService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   private async scheduleTrialExpiryEmail(companyId: string, endDate: Date) {
@@ -68,8 +89,24 @@ export class ChillerService {
     );
   }
 
-  async create(dto: CreateChillerDTO) {
+  async create(dto: CreateChillerDTO, loggedInUserId: string) {
     try {
+      const loggedInUser = await this.userModel.findById(
+        new mongoose.Types.ObjectId(loggedInUserId),
+      );
+
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
+
+      const chillerExist = await this.chillerModel.findOne({
+        serialNumber: dto.serialNumber,
+      });
+      if (chillerExist) {
+        throw TypeExceptions.AlreadyExistsCommonFunction(
+          CHILLER.SERIAL_NUMBER_EXIST,
+        );
+      }
       const chillerData = {
         ...dto,
         companyId: dto.companyId
@@ -151,6 +188,37 @@ export class ChillerService {
         );
       }
 
+      const companyManager = await this.userModel.findOne({
+        companyId: new mongoose.Types.ObjectId(dto.companyId),
+        role: Role.CORPORATE_MANAGER,
+      });
+
+      const company = await this.companyModel.findById(
+        new mongoose.Types.ObjectId(dto.companyId),
+      );
+
+      let companyName = "";
+      if (company) {
+        companyName = company?.name || "";
+      }
+
+      if (companyManager) {
+        const adminRoleText = userRoleName(loggedInUser.role);
+
+        const message = `A new Chiller - '${created.ChillerNo} ${created.serialNumber}' has been added under the Company - ${companyName} by ${adminRoleText} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`;
+        await this.notificationService.sendNotification(companyManager._id, {
+          senderId: null,
+          receiverId: companyManager._id,
+          title: "Chiller Added",
+          message: message,
+          type: NotificationRedirectionType.CHILLER_ADDED,
+          redirection: {
+            facilityId: created._id,
+            type: NotificationRedirectionType.CHILLER_ADDED,
+          },
+        });
+      }
+
       if (dto?.companyId) {
         await this.companyModel.updateOne(
           { _id: new mongoose.Types.ObjectId(dto?.companyId) },
@@ -173,18 +241,19 @@ export class ChillerService {
             // end.setDate(end.getDate() + 30);
             // end.setHours(23, 59, 59, 999); // End at midnight on day 30
             const end = new Date(start.getTime() + 10 * 60 * 1000); // kept for QA. Update it to above original logic
-
-            await this.companyModel.updateOne(
-              { _id: dto.companyId },
-              {
-                $set: {
-                  freeTrialStartDate: start,
-                  freeTrialEndDate: end,
-                  trialReminderSent: false,
-                  status: CompanyStatus.DEMO,
+            if (company.status == CompanyStatus.PROSPECT) {
+              await this.companyModel.updateOne(
+                { _id: dto.companyId },
+                {
+                  $set: {
+                    freeTrialStartDate: start,
+                    freeTrialEndDate: end,
+                    trialReminderSent: false,
+                    status: CompanyStatus.DEMO,
+                  },
                 },
-              },
-            );
+              );
+            }
 
             // ✅ Schedule 24hr email reminder
             await this.scheduleTrialExpiryEmail(dto.companyId, end);
@@ -354,6 +423,7 @@ export class ChillerService {
         $project: {
           _id: 1,
           ChillerNo: 1,
+          ChillerNumber: 1,
           model: 1,
           make: 1,
           tons: 1,
@@ -373,6 +443,7 @@ export class ChillerService {
           energyCost: 1,
           serialNumber: 1,
           latestLog: 1,
+          emissionFactor: 1,
         },
       });
 
@@ -441,17 +512,8 @@ export class ChillerService {
           totalRecords: [{ $count: "count" }],
         },
       });
-      // console.log('✌️pipeline --->', pipeline);
 
       const result = await this.chillerModel.aggregate(pipeline);
-
-      // const metricFieldMap: Record<string, string> = {
-      //   efficiencyLoss: 'effLoss',
-      //   condenserLoss: 'condAppLoss',
-      //   evaporatorLoss: 'evapAppLoss',
-      //   nonCondenserLoss: 'nonCondLoss',
-      //   otherLoss: 'otherLoss',
-      // };
 
       const generalConditions = findUser?.alerts?.general?.conditions || [];
       console.log("✌️generalConditions --->", generalConditions);
@@ -491,45 +553,6 @@ export class ChillerService {
           return "warning";
         return "normal";
       };
-
-      // const formattedChillers = result.map((chiller) => {
-      //   const log = chiller?.latestLog;
-      //   console.log('✌️log --->', log);
-
-      //   const latestLog = log
-      //     ? {
-      //         ...log,
-      //         effLoss: {
-      //           value: log.effLoss ?? 0,
-      //           type: getLossType('efficiencyLoss', log.effLoss ?? 0),
-      //         },
-      //         condAppLoss: {
-      //           value: log.condAppLoss ?? 0,
-      //           type: getLossType('condenserLoss', log.condAppLoss ?? 0),
-      //         },
-      //         evapAppLoss: {
-      //           value: log.evapAppLoss ?? 0,
-      //           type: getLossType('evaporatorLoss', log.evapAppLoss ?? 0),
-      //         },
-      //         nonCondLoss: {
-      //           value: log.nonCondLoss ?? 0,
-      //           type: getLossType('nonCondenserLoss', log.nonCondLoss ?? 0),
-      //         },
-      //         otherLoss: {
-      //           value: log.otherLoss ?? 0,
-      //           type: getLossType('otherLoss', log.otherLoss ?? 0),
-      //         },
-      //       }
-      //     : undefined;
-
-      //   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      //   const { logs, ...rest } = chiller;
-
-      //   return {
-      //     ...rest,
-      //     latestLog,
-      //   };
-      // });
       const formattedChillers = result[0]?.chillerList.map((chiller) => {
         const log = chiller?.latestLog;
 
@@ -572,26 +595,29 @@ export class ChillerService {
         // If no latest log, just return the base chiller data (no `latestLog` key)
         return rest;
       });
-      // console.log('✌️formattedChillers --->', formattedChillers);
 
-      // return {
-      //   ...result[0],
-      //   totalRecords: result[0]?.totalRecords?.[0]?.count || 0,
-      // };
       return {
         chillerList: formattedChillers,
-        totalRecords: formattedChillers?.totalRecords?.count || 0,
+        totalRecords: formattedChillers.length || 0,
       };
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
   }
 
-  async findByFacilityIds(dto: ChillerByFacilityDto) {
+  async findByFacilityIds(dto: ChillerByFacilityDto, loggedInUserId: string) {
     try {
       // const facilityObjectIds = dto.facilityIds.map(
       //   (id) => new mongoose.Types.ObjectId(id),
       // );
+
+      const loggedInUser = await this.userModel.findById({
+        _id: new mongoose.Types.ObjectId(loggedInUserId),
+      });
+
+      if (!loggedInUser) {
+        throw TypeExceptions.BadRequestCommonFunction(USER.USER_NOT_FOUND);
+      }
 
       const {
         page = 1,
@@ -720,6 +746,7 @@ export class ChillerService {
         $project: {
           _id: 1,
           ChillerNo: 1,
+          ChillerNumber: 1,
           make: 1,
           model: 1,
           tons: 1,
@@ -732,6 +759,7 @@ export class ChillerService {
           chillerName: 1,
           totalOperators: { $size: "$operators" },
           createdAt: 1,
+          emissionFactor: 1,
         },
       });
 
@@ -771,9 +799,67 @@ export class ChillerService {
         },
       });
 
-      // pipeline.push({
-      //   $sort: { createdAt: -1 },
-      // });
+      // 1. Get the latest log per chiller
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.LOGS,
+          let: { chillerId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$chillerId", "$$chillerId"] },
+                    { $eq: ["$isDeleted", false] },
+                  ],
+                },
+              },
+            },
+            { $sort: { readingDateUTC: -1 } },
+            { $limit: 1 },
+          ],
+          as: "latestLog",
+        },
+      });
+
+      // 2. Flatten latestLog (grab first element from array)
+      pipeline.push({
+        $addFields: {
+          latestLog: { $arrayElemAt: ["$latestLog", 0] },
+        },
+      });
+
+      // 3. Lookup user info for updatedBy from latestLog
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.USERS,
+          let: { updatedById: "$latestLog.updatedBy" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$_id", "$$updatedById"] },
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                firstName: 1,
+                lastName: 1,
+              },
+            },
+          ],
+          as: "latestLog.updatedByUser",
+        },
+      });
+
+      // 4. Flatten updatedByUser array
+      pipeline.push({
+        $addFields: {
+          "latestLog.updatedByUser": {
+            $arrayElemAt: ["$latestLog.updatedByUser", 0],
+          },
+        },
+      });
 
       pipeline.push({
         $facet: {
@@ -782,83 +868,104 @@ export class ChillerService {
         },
       });
 
-      // const chillers = await this.chillerModel.aggregate(pipeline);
-
-      // const chillers = await this.chillerModel.aggregate([
-      //   {
-      //     $match: {
-      //       facilityId: { $in: facilityObjectIds },
-      //       isDeleted: false,
-      //     },
-      //   },
-      //   {
-      //     $lookup: {
-      //       from: TABLE_NAMES.FACILITY, // assumes collection name is 'facilities'
-      //       localField: 'facilityId',
-      //       foreignField: '_id',
-      //       as: 'facility',
-      //     },
-      //   },
-      //   { $unwind: '$facility' },
-      //   {
-      //     $lookup: {
-      //       from: TABLE_NAMES.USERS,
-      //       let: { chillerId: '$_id' },
-      //       pipeline: [
-      //         {
-      //           $match: {
-      //             $expr: {
-      //               $in: ['$$chillerId', '$chillerIds'],
-      //             },
-      //           },
-      //         },
-      //         {
-      //           $match: {
-      //             role: Role.OPERATOR, // optional: filter only operators
-      //           },
-      //         },
-      //       ],
-      //       as: 'operators',
-      //     },
-      //   },
-      //   {
-      //     $project: {
-      //       _id: 1,
-      //       ChillerNo: 1,
-      //       make: 1,
-      //       model: 1,
-      //       tons: 1,
-      //       energyCost: 1,
-      //       facilityId: 1,
-      //       companyId: 1,
-      //       facilityName: '$facility.name',
-      //       status: 1,
-      //       totalOperators: { $size: '$operators' },
-      //     },
-      //   },
-      // ]);
-
-      // console.log('✌️chillers --->', chillers);
-      // return chillers;
       const result = await this.chillerModel.aggregate(pipeline);
       const response = result[0] || {
         chillerList: [],
         totalRecords: [],
       };
 
+      const generalConditions = loggedInUser?.alerts?.general?.conditions || [];
+
+      const evaluateCondition = (
+        value: number,
+        operator: string,
+        threshold: number,
+      ): boolean => {
+        switch (operator) {
+          case ">":
+            return value > threshold;
+          case ">=":
+            return value >= threshold;
+          case "<":
+            return value < threshold;
+          case "<=":
+            return value <= threshold;
+          case "=":
+            return value === threshold;
+          default:
+            return false;
+        }
+      };
+
+      const getLossType = (
+        metric: string,
+        value: number,
+      ): "normal" | "warning" | "alert" => {
+        const condition = generalConditions.find((c) => c.metric === metric);
+        if (!condition) return "normal";
+        const { warning, alert } = condition;
+        if (evaluateCondition(value, alert.operator, alert.threshold))
+          return "alert";
+        if (evaluateCondition(value, warning.operator, warning.threshold))
+          return "warning";
+        return "normal";
+      };
+
+      const formattedChillers = response.chillerList.map((chiller) => {
+        const log = chiller.latestLog;
+
+        if (Object.keys(log).length) {
+          return {
+            ...chiller,
+            latestLog: {
+              ...log,
+              effLoss: {
+                value: log.effLoss ?? 0,
+                type: getLossType("efficiencyLoss", log.effLoss ?? 0),
+              },
+              condAppLoss: {
+                value: log.condAppLoss ?? 0,
+                type: getLossType("condenserLoss", log.condAppLoss ?? 0),
+              },
+              evapAppLoss: {
+                value: log.evapAppLoss ?? 0,
+                type: getLossType("evaporatorLoss", log.evapAppLoss ?? 0),
+              },
+              nonCondLoss: {
+                value: log.nonCondLoss ?? 0,
+                type: getLossType("nonCondenserLoss", log.nonCondLoss ?? 0),
+              },
+              otherLoss: {
+                value: log.otherLoss ?? 0,
+                type: getLossType("otherLoss", log.otherLoss ?? 0),
+              },
+            },
+          };
+        }
+
+        return chiller;
+      });
+
       return {
         totalRecords: response.totalRecords.length
           ? response.totalRecords[0].count
           : 0,
-        chillerList: response.chillerList,
+        chillerList: formattedChillers,
       };
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, loggedInUserId: string) {
     try {
+      const loggedInUser = await this.userModel.findById({
+        _id: new mongoose.Types.ObjectId(loggedInUserId),
+      });
+
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
       const objectId = new mongoose.Types.ObjectId(id);
 
       const matchObj = {
@@ -903,14 +1010,51 @@ export class ChillerService {
       });
 
       pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.LOGS,
+          let: { chillerId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$chillerId", "$$chillerId"] },
+              },
+            },
+            { $sort: { readingDateUTC: -1 } },
+            { $limit: 1 },
+            // {
+            //   $project: {
+            //     readingDate: 1,
+            //     readingDateUTC: 1,
+            //     effLoss: 1,
+            //     condAppLoss: 1,
+            //     evapAppLoss: 1,
+            //     nonCondLoss: 1,
+            //     otherLoss: 1,
+            //   },
+            // },
+          ],
+          as: "latestLog",
+        },
+      });
+
+      pipeline.push({
+        $unwind: {
+          path: "$latestLog",
+          preserveNullAndEmptyArrays: true,
+        },
+      });
+
+      pipeline.push({
         $project: {
           companyId: 1,
           facilityId: 1,
           companyName: "$company.name",
           facilityName: "$facility.name",
+          facilityTimezone: "$facility.timezone",
           type: 1,
           unit: 1,
           ChillerNo: 1,
+          ChillerNumber: 1,
           weeklyHours: 1,
           weeksPerYear: 1,
           avgLoadProfile: 1,
@@ -959,6 +1103,11 @@ export class ChillerService {
           evapDesignFlow: 1,
           numberOfCompressors: 1,
           useLoad: 1,
+          latestLog: 1,
+          emissionFactor: 1,
+          effLossAtFullLoad: 1,
+          effLoss: 1,
+          targetCost: 1,
         },
       });
 
@@ -971,13 +1120,280 @@ export class ChillerService {
       //     RESPONSE_ERROR.FACILITY_NOT_FOUND,
       //   );
       // }
-      if (!result.length) {
+      if (!result || result.length === 0) {
         throw TypeExceptions.BadRequestCommonFunction(
           RESPONSE_ERROR.FACILITY_NOT_FOUND,
         );
       }
 
+      const generalConditions = loggedInUser?.alerts?.general?.conditions || [];
+      console.log("✌️generalConditions --->", generalConditions);
+
+      const evaluateCondition = (
+        value: number,
+        operator: string,
+        threshold: number,
+      ): boolean => {
+        switch (operator) {
+          case ">":
+            return value > threshold;
+          case ">=":
+            return value >= threshold;
+          case "<":
+            return value < threshold;
+          case "<=":
+            return value <= threshold;
+          case "=":
+            return value === threshold;
+          default:
+            return false;
+        }
+      };
+
+      const getLossType = (
+        metric: string,
+        value: number,
+      ): "normal" | "warning" | "alert" => {
+        const condition = generalConditions.find((c) => c.metric === metric);
+        if (!condition) return "normal";
+
+        const { warning, alert } = condition;
+        if (evaluateCondition(value, alert.operator, alert.threshold))
+          return "alert";
+        if (evaluateCondition(value, warning.operator, warning.threshold))
+          return "warning";
+        return "normal";
+      };
+
       const chiller = result[0];
+
+      if (chiller.latestLog) {
+        chiller.latestLog = {
+          ...chiller.latestLog,
+          effLoss: {
+            value: chiller.latestLog.effLoss ?? 0,
+            type: getLossType("efficiencyLoss", chiller.latestLog.effLoss ?? 0),
+          },
+          condAppLoss: {
+            value: chiller.latestLog.condAppLoss ?? 0,
+            type: getLossType(
+              "condenserLoss",
+              chiller.latestLog.condAppLoss ?? 0,
+            ),
+          },
+          evapAppLoss: {
+            value: chiller.latestLog.evapAppLoss ?? 0,
+            type: getLossType(
+              "evaporatorLoss",
+              chiller.latestLog.evapAppLoss ?? 0,
+            ),
+          },
+          nonCondLoss: {
+            value: chiller.latestLog.nonCondLoss ?? 0,
+            type: getLossType(
+              "nonCondenserLoss",
+              chiller.latestLog.nonCondLoss ?? 0,
+            ),
+          },
+          otherLoss: {
+            value: chiller.latestLog.otherLoss ?? 0,
+            type: getLossType("otherLoss", chiller.latestLog.otherLoss ?? 0),
+          },
+        };
+      }
+
+      const performanceSummary =
+        await LogRecordHelper.createPerformanceSummaryForChiller(
+          chiller._id,
+          this.logsModel,
+          this.chillerModel,
+        );
+      console.log("✌️performanceSummary --->", performanceSummary);
+
+      const annualRunHr = chiller.weeklyHours * chiller.weeksPerYear;
+
+      const purgeTimeSummary =
+        await LogRecordHelper.getPurgeTimeSummaryForChiller(
+          chiller._id,
+          this.logsModel,
+        );
+      console.log("✌️purgeTimeSummary --->", purgeTimeSummary);
+
+      const problemSolution = [];
+      const lossFields = [
+        { key: "condInletLoss", field: "Cond. Inlet Loss %" },
+        { key: "condAppLoss", field: "Cond. App. Loss %" },
+        { key: "evapTempLoss", field: "Evap. Temp. Loss %" },
+        { key: "evapAppLoss", field: "Evap. App. Loss %" },
+        { key: "nonCondLoss", field: "Non-Cond. Loss %" },
+        { key: "deltaLoss", field: "Delta Loss %" },
+      ];
+
+      for (const { key, field } of lossFields) {
+        const lossValue = chiller?.latestLog?.[key];
+        let numericLossValue = 0;
+        let prob_eff_loss;
+        let proj_cost_of_loss;
+
+        if (key == "condInletLoss") {
+          prob_eff_loss = chiller?.latestLog?.["condInletLoss"];
+          proj_cost_of_loss = chiller?.latestLog?.["condInletLossCost"];
+        } else if (key == "condAppLoss") {
+          prob_eff_loss = chiller?.latestLog?.["condAppLoss"];
+          proj_cost_of_loss = chiller?.latestLog?.["condAppLossCost"];
+        } else if (key == "evapTempLoss") {
+          prob_eff_loss = chiller?.latestLog?.["evapTempLoss"];
+          proj_cost_of_loss = chiller?.latestLog?.["evapTempLossCost"];
+        } else if (key == "evapAppLoss") {
+          prob_eff_loss = chiller?.latestLog?.["evapAppLoss"];
+          proj_cost_of_loss = chiller?.latestLog?.["evapAppLossCost"];
+        } else if (key == "nonCondLoss") {
+          prob_eff_loss = chiller?.latestLog?.["nonCondLoss"];
+          proj_cost_of_loss = chiller?.latestLog?.["nonCondLossCost"];
+        } else if (key == "deltaLoss") {
+          prob_eff_loss = chiller?.latestLog?.["deltaLoss"];
+          proj_cost_of_loss = chiller?.latestLog?.["deltaLossCost"];
+        }
+        // Normalize value
+        if (typeof prob_eff_loss === "number") {
+          // prob_eff_loss = prob_eff_loss;
+        } else if (
+          typeof prob_eff_loss === "object" &&
+          prob_eff_loss?.value !== undefined
+        ) {
+          prob_eff_loss = prob_eff_loss.value;
+        }
+
+        if (typeof lossValue === "number") {
+          numericLossValue = lossValue;
+        } else if (
+          typeof lossValue === "object" &&
+          lossValue?.value !== undefined
+        ) {
+          numericLossValue = lossValue.value;
+        }
+        if (numericLossValue > 0) {
+          const ps = await this.problemSolutionModel.findOne({
+            section: "Calculated",
+            field,
+          });
+          if (ps) {
+            const insertObject = {
+              ...ps["_doc"],
+              prob_eff_loss,
+              proj_cost_of_loss,
+            };
+            problemSolution.push(insertObject);
+          }
+        }
+      }
+      console.log("chiller.latestLog: ", chiller.latestLog);
+
+      // Convert to IST and format
+      const istDate = dayjs
+        .utc(chiller.latestLog?.readingDateUTC)
+        .tz("Asia/Kolkata");
+
+      const formattedDate = istDate?.format("M/D/YY"); // e.g., 7/30/25
+      const formattedTime = istDate?.format("h:mm A"); // e.g., 9:00 AM
+
+      const recentReadingAnalysis = chiller.latestLog
+        ? {
+            readingDateUTC: chiller.latestLog?.readingDateUTC,
+            dateTime: formattedDate,
+            formattedTime: formattedTime,
+            logId: chiller?.latestLog?._id,
+            problem: problemSolution,
+            effLoss: chiller.latestLog.effLoss || 0,
+            effLossAtAverageLoadProfile: chiller.latestLog.effLoss || 0,
+            effLossAtFullLoad: chiller.latestLog?.effLossAtFullLoad || 0,
+            projectedAnnualCostOfLoss: this.calculateProjectedAnnualCost(
+              chiller.latestLog.effLoss || 0,
+              chiller.energyCost || 0,
+              chiller.tons || 0,
+              chiller.avgLoadProfile || 0,
+              annualRunHr,
+            ),
+            // Additional detailed metrics
+            condAppLoss: chiller.latestLog.condAppLoss || 0,
+            evapAppLoss: chiller.latestLog.evapAppLoss || 0,
+            nonCondLoss: chiller.latestLog.nonCondLoss || 0,
+            otherLoss: chiller.latestLog.otherLoss || 0,
+            totalLoss:
+              (chiller.latestLog.effLoss?.value || 0) +
+              (chiller.latestLog.condAppLoss?.value || 0) +
+              (chiller.latestLog.evapAppLoss?.value || 0) +
+              (chiller.latestLog.nonCondLoss?.value || 0) +
+              (chiller.latestLog.otherLoss?.value || 0),
+            // Loss types for UI indicators
+            lossTypes: {
+              effLoss: chiller.latestLog.effLoss || 0,
+              condAppLoss: chiller.latestLog.condAppLoss || 0,
+              evapAppLoss: chiller.latestLog.evapAppLoss || 0,
+              nonCondLoss: chiller.latestLog.nonCondLoss || 0,
+              otherLoss: chiller.latestLog.otherLoss || 0,
+            },
+          }
+        : null;
+
+      // Enhanced performance summary for UI
+      const enhancedPerformanceSummary = {
+        ...performanceSummary,
+        // Add calculated metrics for UI
+        costMetrics: {
+          targetCost: performanceSummary[1]?.perfSummary?.targetCost || 0,
+          actualCost: performanceSummary[1]?.perfSummary?.actualCost || 0,
+          lossCost: performanceSummary[1]?.perfSummary?.lossCost || 0,
+          avgLoss: performanceSummary[1]?.perfSummary?.lossCost || 0,
+        },
+        efficiencyMetrics: {
+          avgEffLoss: performanceSummary[1]?.perfSummary?.avgLoss || 0,
+          kwhLoss: performanceSummary[1]?.perfSummary?.kwhLoss || 0,
+          btuLoss: performanceSummary[1]?.perfSummary?.btuLoss || 0,
+          co2: performanceSummary[1]?.perfSummary?.co2 || 0,
+        },
+      };
+
+      // Enhanced compressor run hours for UI
+      const compressorRunHours = {
+        runHrYTD: await this.calculateRunHoursForPeriod(chiller._id, "ytd"),
+        runHrLastYTD: await this.calculateRunHoursForPeriod(
+          chiller._id,
+          "lastYtd",
+        ),
+        runHrLast12Months: await this.calculateRunHoursForPeriod(
+          chiller._id,
+          "last12Months",
+        ),
+        estAnnualRunHr: annualRunHr,
+        // Additional run hour metrics
+        weeklyHours: chiller.weeklyHours || 0,
+        weeksPerYear: chiller.weeksPerYear || 0,
+        useRunHours: chiller.useRunHours || false,
+      };
+
+      // Enhanced purge data for UI
+      const enhancedPurgeData = {
+        mostRecent7DayAvg: purgeTimeSummary["7DayAvg"] || 0,
+        mostRecent30DayAvg: purgeTimeSummary["30DayAvg"] || 0,
+        // Additional purge metrics
+        havePurge: chiller.havePurge || false,
+        maxPurgeTime: chiller.maxPurgeTime || 0,
+        purgeReadingUnit: chiller.purgeReadingUnit || "minutes",
+        // Format for UI display
+        display7DayAvg: `${purgeTimeSummary["7DayAvg"] || 0} min./day`,
+        display30DayAvg: `${purgeTimeSummary["30DayAvg"] || 0} min./day`,
+      };
+
+      const response = {
+        ...chiller,
+        recentReadingAnalysis,
+        performanceSummary: enhancedPerformanceSummary,
+        compressorRunHours,
+        purgeData: enhancedPurgeData,
+        // annualRunHr,
+        // purgeTimeSummary,
+      };
 
       // if (chiller.unit === MEASUREMENT_UNITS.SIMetric) {
       //   // chiller.tons = parseFloat((chiller.tons * 3.51685).toFixed(2));
@@ -986,8 +1402,9 @@ export class ChillerService {
       //   chiller.tons = Math.round(kwr * 10000) / 10000; // reverse with 4 decimals
       // }
 
-      return chiller;
+      return response;
     } catch (error) {
+      console.log("error: ----", error);
       throw CustomError.UnknownError(error?.message, error?.status);
     }
   }
@@ -1080,6 +1497,53 @@ export class ChillerService {
       chiller.status = status;
       await chiller.save();
 
+      const loggedInUser = await this.userModel.findById(
+        new mongoose.Types.ObjectId(userId),
+      );
+
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
+
+      const companyManager = await this.userModel.findOne({
+        role: Role.CORPORATE_MANAGER,
+        companyId: chiller.companyId,
+      });
+
+      const info = status == ChillerStatus.Active ? "Activated" : "Inactivated";
+
+      const type =
+        status == ChillerStatus.Active
+          ? NotificationRedirectionType.CHILLER_ACTIVATED
+          : NotificationRedirectionType.CHILLER_INACTIVATED;
+
+      if (companyManager) {
+        const adminRoleText = userRoleName(loggedInUser.role);
+
+        // if (chiller.status == ChillerStatus.InActive) {
+        const notifyMessage =
+          status === ChillerStatus.Active
+            ? `Chiller - '${chiller.ChillerNo} ${chiller.serialNumber}' has been activated. The activation was done by ${adminRoleText} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`
+            : `Chiller - '${chiller.ChillerNo} ${chiller.serialNumber}' has been inactivated. New log entries will be prohibited but the existing data will remain as it is. It was inactivated by ${adminRoleText} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`;
+        const payload = {
+          senderId: null,
+          receiverId: companyManager._id,
+          title: `Chiller ${info}`,
+          message: notifyMessage,
+          type: type,
+          redirection: {
+            chillerId: chiller._id,
+            type: type,
+          },
+        };
+
+        await this.notificationService.sendNotification(
+          payload.receiverId,
+          payload,
+        );
+        // }
+      }
+
       // Notify company & facility manager + all operators
       await this.sendInactivationNotification(chiller, status);
 
@@ -1164,7 +1628,20 @@ export class ChillerService {
           RESPONSE_ERROR.CHILLER_NOT_FOUND,
         );
       }
+      // Check for serial number uniqueness, only if it's being updated
+      if (body.serialNumber && body.serialNumber !== chiller.serialNumber) {
+        const serialNumberExists = await this.chillerModel.findOne({
+          serialNumber: body.serialNumber,
+          _id: { $ne: chiller._id }, // exclude the current chiller
+          isDeleted: false,
+        });
 
+        if (serialNumberExists) {
+          throw TypeExceptions.AlreadyExistsCommonFunction(
+            CHILLER.SERIAL_NUMBER_EXIST,
+          );
+        }
+      }
       // Prevent updating immutable fields
       const IMMUTABLE_FIELDS = ["companyId", "facilityId", "type", "unit"];
       for (const field of IMMUTABLE_FIELDS) {
@@ -1223,13 +1700,6 @@ export class ChillerService {
           _id: chiller.companyId,
         });
 
-        // const existingActiveChillers = await this.chillerModel.findOne({
-        //   companyId: company._id,
-        //   // status: CHILLER_STATUS.Active,
-        //   // _id: { $ne: chiller._id },
-        // });
-        // console.log('✌️existingActiveChillers --->', existingActiveChillers);
-
         if (company.status == CompanyStatus.PROSPECT) {
           console.log("inside the company status update check");
           await this.companyModel.findOneAndUpdate(
@@ -1245,6 +1715,9 @@ export class ChillerService {
         chiller.status === CHILLER_STATUS.Active,
       );
       if (chiller.companyId && chiller.status === CHILLER_STATUS.Active) {
+        const company = await this.companyModel.findOne({
+          _id: chiller.companyId,
+        });
         const existingActiveChiller = await this.chillerModel.findOne({
           companyId: chiller.companyId,
           status: CHILLER_STATUS.Active,
@@ -1263,18 +1736,19 @@ export class ChillerService {
           // end.setDate(end.getDate() + 30);
           // end.setHours(23, 59, 59, 999); // End at midnight on day 30
           const end = new Date(start.getTime() + 10 * 60 * 1000); // kept for QA. Update it to above original logic
-
-          await this.companyModel.updateOne(
-            { _id: chiller.companyId },
-            {
-              $set: {
-                freeTrialStartDate: start,
-                freeTrialEndDate: end,
-                trialReminderSent: false,
-                status: CompanyStatus.DEMO,
+          if (company.status == CompanyStatus.PROSPECT) {
+            await this.companyModel.updateOne(
+              { _id: chiller.companyId },
+              {
+                $set: {
+                  freeTrialStartDate: start,
+                  freeTrialEndDate: end,
+                  trialReminderSent: false,
+                  status: CompanyStatus.DEMO,
+                },
               },
-            },
-          );
+            );
+          }
 
           // ✅ Schedule 24hr email reminder
           await this.scheduleTrialExpiryEmail(
@@ -1291,6 +1765,35 @@ export class ChillerService {
       }
 
       const result = await chiller.save();
+
+      const loggedInUser = await this.userModel.findById(
+        new mongoose.Types.ObjectId(userId),
+      );
+
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
+
+      const companyManager = await this.userModel.findOne({
+        role: Role.CORPORATE_MANAGER,
+        companyId: result.companyId,
+      });
+
+      const adminRoleText = userRoleName(loggedInUser.role);
+      if (companyManager) {
+        const message = `Chiller - '${result.ChillerNo} ${result.serialNumber}' has been updated. The update was done by ${adminRoleText} - '${loggedInUser.firstName} ${loggedInUser.lastName}'.`;
+        await this.notificationService.sendNotification(companyManager._id, {
+          senderId: null,
+          receiverId: companyManager._id,
+          title: "Chiller updated",
+          message: message,
+          type: NotificationRedirectionType.CHILLER_UPDATED,
+          redirection: {
+            facilityId: result._id,
+            type: NotificationRedirectionType.CHILLER_UPDATED,
+          },
+        });
+      }
 
       if (updatedFields.length > 0) {
         const user = await this.userModel
@@ -1371,6 +1874,90 @@ export class ChillerService {
     }
 
     return CHILLER_STATUS.Active;
+  }
+
+  private calculateProjectedAnnualCost(
+    effLoss: number,
+    energyCost: number,
+    tons: number,
+    avgLoadProfile: number,
+    annualRunHours: number,
+  ): number {
+    if (
+      !effLoss ||
+      !energyCost ||
+      !tons ||
+      !avgLoadProfile ||
+      !annualRunHours
+    ) {
+      return 0;
+    }
+
+    // Calculate hourly loss cost
+    const hourlyLossCost =
+      (effLoss / 100) * energyCost * tons * (avgLoadProfile / 100);
+
+    // Project to annual cost
+    const annualCost = hourlyLossCost * annualRunHours;
+
+    return Math.round(annualCost * 100) / 100; // Round to 2 decimal places
+  }
+
+  private async calculateRunHoursForPeriod(
+    chillerId: mongoose.Types.ObjectId,
+    period: "ytd" | "lastYtd" | "last12Months",
+  ): Promise<number> {
+    try {
+      const today = new Date();
+      let startDate: Date;
+      let endDate: Date;
+
+      switch (period) {
+        case "ytd":
+          startDate = new Date(today.getFullYear(), 0, 1);
+          endDate = today;
+          break;
+        case "lastYtd":
+          startDate = new Date(today.getFullYear() - 1, 0, 1);
+          endDate = new Date(
+            today.getFullYear() - 1,
+            today.getMonth(),
+            today.getDate(),
+          );
+          break;
+        case "last12Months":
+          startDate = new Date(today.getFullYear() - 1, 0, 1);
+          endDate = new Date(today.getFullYear() - 1, 11, 31);
+          break;
+        default:
+          return 0;
+      }
+
+      // Get logs in the date range
+      const logs = await this.logsModel
+        .find({
+          chillerId: chillerId,
+          isDeleted: false,
+          readingDateUTC: { $gte: startDate, $lte: endDate },
+          runHours: { $exists: true, $ne: null },
+        })
+        .sort({ readingDateUTC: -1 });
+
+      if (logs.length < 2) {
+        return 0;
+      }
+
+      // Calculate total run hours for the period
+      const firstLog = logs[logs.length - 1];
+      const lastLog = logs[0];
+
+      const totalRunHours = Math.abs(lastLog.runHours - firstLog.runHours);
+
+      return Math.round(totalRunHours * 100) / 100; // Round to 2 decimal places
+    } catch (error) {
+      console.error("Error calculating run hours for period:", error);
+      return 0;
+    }
   }
 
   async findAllActiveChillers(dto) {

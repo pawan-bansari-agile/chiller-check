@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import {
   CreateLogDTO,
   ExportLogIds,
@@ -9,8 +9,8 @@ import {
   UpdateLogDto,
 } from "./dto/logs.dto";
 import { InjectModel } from "@nestjs/mongoose";
-import { Logs } from "src/common/schema/logs.schema";
-import mongoose, { Model } from "mongoose";
+import { Logs, LogsDocument } from "src/common/schema/logs.schema";
+import mongoose, { FilterQuery, Model } from "mongoose";
 import { Timeline } from "src/common/schema/timeline.schema";
 import { Chiller } from "src/common/schema/chiller.schema";
 import {
@@ -22,6 +22,7 @@ import { RESPONSE_ERROR } from "src/common/constants/response.constant";
 import { User } from "src/common/schema/user.schema";
 import { LogRecordHelper } from "src/common/helpers/logs/log.helper";
 import {
+  AppEnvironment,
   ChillerStatus,
   // CHILLER_STATUS,
   MEASUREMENT_UNITS,
@@ -43,9 +44,22 @@ import { BadLog } from "src/common/schema/badLogs.schema";
 import * as ExcelJS from "exceljs";
 import { Workbook } from "exceljs";
 import * as fs from "fs";
+import * as dayjs from "dayjs";
+import { ImageUploadService } from "../image-upload/image-upload.service";
+import * as utc from "dayjs/plugin/utc";
+import * as customParseFormat from "dayjs/plugin/customParseFormat";
+import { ProblemAndSolutions } from "src/common/schema/problemAndSolutions.schema";
+import { NotificationService } from "src/common/services/notification.service";
+import { EmailService } from "src/common/helpers/email/email.service";
+import { generalAlertNotificationTemplate } from "src/common/helpers/email/emailTemplates/generalAlertTemplate";
+
+dayjs.extend(utc);
+dayjs.extend(customParseFormat);
 
 @Injectable()
 export class LogService {
+  private readonly logger = new Logger(LogService.name);
+
   constructor(
     @InjectModel(Logs.name) private readonly logsModel: Model<Logs>,
     @InjectModel(Timeline.name) private readonly timelineModel: Model<Timeline>,
@@ -58,6 +72,11 @@ export class LogService {
     private readonly altCorrectionModel: Model<AltitudeCorrection>,
     @InjectModel(Conversion.name)
     private conversionModel: Model<Conversion>,
+    @InjectModel(ProblemAndSolutions.name)
+    private readonly problemSolutionModel: Model<ProblemAndSolutions>,
+    private imageService: ImageUploadService,
+    private readonly notificationService: NotificationService,
+    private emailService: EmailService,
   ) {}
 
   private isNumeric(value: any): boolean {
@@ -70,6 +89,16 @@ export class LogService {
       if (!user) {
         throw TypeExceptions.NotFoundCommonFunction(
           RESPONSE_ERROR.USER_NOT_FOUND,
+        );
+      }
+
+      const company = await this.companyModel.findById({
+        _id: new mongoose.Types.ObjectId(createLogDto.companyId),
+      });
+
+      if (!company) {
+        throw TypeExceptions.NotFoundCommonFunction(
+          RESPONSE_ERROR.COMPANY_NOT_FOUND,
         );
       }
 
@@ -108,6 +137,8 @@ export class LogService {
           ? new mongoose.Types.ObjectId(createLogDto.chillerId)
           : undefined,
         userId: new mongoose.Types.ObjectId(user._id),
+        companyId: new mongoose.Types.ObjectId(createLogDto.companyId),
+        facilityId: new mongoose.Types.ObjectId(createLogDto.facilityId),
       };
 
       logData.readingDateUTC = LogRecordHelper.convertToUTCString(
@@ -115,6 +146,21 @@ export class LogService {
         logData.readingTime,
         logData.readingTimeZone,
       );
+
+      const findExistingLogWithSameDate = await this.logsModel.findOne({
+        chillerId: createLogDto?.chillerId,
+        readingDateUTC: logData.readingDateUTC,
+        isDeleted: false,
+      });
+
+      console.log("findExistingLogWithSameDate: ", findExistingLogWithSameDate);
+
+      if (findExistingLogWithSameDate) {
+        // Skip main log creation for existing dates
+        throw TypeExceptions.BadRequestCommonFunction(
+          RESPONSE_ERROR.DUPLICATE_READING_DATE,
+        );
+      }
 
       if (
         chiller.ampChoice == "1-Phase" ||
@@ -230,7 +276,11 @@ export class LogService {
         LogRecordHelper.calcEvapTempLoss(logData, chiller),
       );
       logData.evapAppLoss = LogRecordHelper.roundToFourDecimals(
-        LogRecordHelper.calcEvapAppLoss(logData, chiller),
+        await LogRecordHelper.calcEvapAppLoss(
+          logData,
+          chiller,
+          this.conversionModel,
+        ),
       );
       logData.nonCondLoss = LogRecordHelper.roundToFourDecimals(
         LogRecordHelper.calcNonCondLoss(logData, chiller),
@@ -250,19 +300,25 @@ export class LogService {
       const costPerHour = LogRecordHelper.roundToFourDecimals(
         LogRecordHelper.calculateTargetCostPerHour(chiller, logData.energyCost),
       );
-      logData.actualCost = costPerHour;
+      // logData.actualCost = costPerHour;
+      // logData.actualCost = (1 + (logData.totalLoss));
 
       logData.condInletLossCost = LogRecordHelper.roundToFourDecimals(
         logData.condInletLoss * costPerHour,
       );
+      // console.log(
+      //   '✌️logData.condAppLoss * logData.condAppLoss * 0.01 --->',
+      //   logData.condAppLoss * logData.condAppLoss * 0.01
+      // );
       logData.condAppLossCost = LogRecordHelper.roundToFourDecimals(
-        logData.condAppLoss * costPerHour,
+        logData.condAppLoss * logData.targetCost * 0.01,
       );
+      // logData.condAppLoss * logData.targetCost * 0.01),
       logData.evapTempLossCost = LogRecordHelper.roundToFourDecimals(
         logData.evapTempLoss * costPerHour,
       );
       logData.evapAppLossCost = LogRecordHelper.roundToFourDecimals(
-        logData.evapAppLoss * costPerHour,
+        logData.evapAppLoss * logData.targetCost * 0.01,
       );
       logData.nonCondLossCost = LogRecordHelper.roundToFourDecimals(
         logData.nonCondLoss * costPerHour,
@@ -279,8 +335,20 @@ export class LogService {
         logData.nonCondLossCost +
         logData.deltaLossCost;
 
+      // logData.totalLoss = LogRecordHelper.roundToFourDecimals(
+      //   logData.actualCost + logData.lossCost
+      // );
       logData.totalLoss = LogRecordHelper.roundToFourDecimals(
-        logData.actualCost + logData.lossCost,
+        logData.condInletLoss +
+          logData.condAppLoss +
+          logData.evapTempLoss +
+          logData.evapAppLoss +
+          logData.nonCondLoss +
+          logData.deltaLoss,
+      );
+
+      logData.actualCost = LogRecordHelper.roundToFourDecimals(
+        (1 + logData.totalLoss * 0.01) * logData.targetCost,
       );
 
       logData.effLoss = Number(logData.totalLoss?.toFixed(2));
@@ -319,7 +387,7 @@ export class LogService {
       );
       logData.evapApproach = Number(evapApproach.toFixed(4));
 
-      console.log("✌️logData --->", logData);
+      // console.log('✌️logData --->', logData);
       logData.evapAppVariance = LogRecordHelper.roundToFourDecimals(
         await LogRecordHelper.getEvapAppVariance(
           logData,
@@ -421,7 +489,7 @@ export class LogService {
       );
 
       logData.CO2 = LogRecordHelper.roundToFourDecimals(
-        LogRecordHelper.calcCO2(logData),
+        LogRecordHelper.calcCO2(logData, chiller.emissionFactor),
       );
 
       logData.altitudeCorrection = LogRecordHelper.roundToFourDecimals(
@@ -446,21 +514,56 @@ export class LogService {
       logData.otherLoss =
         logData.condInletLoss + logData.evapTempLoss + logData.deltaLoss;
 
+      logData.effLossAtFullLoad =
+        logData.condInletLoss +
+        logData.EFLCondAppLoss +
+        logData.evapTempLoss +
+        logData.EFLEvapAppLoss +
+        logData.nonCondLoss +
+        logData.deltaLoss;
+
       const logPayload = {
         ...logData,
         purgeTimeMin: purgeTime,
         updatedBy: user._id,
+        isLogManual: true,
       };
-      console.log("✌️logPayload --->", logPayload);
+      // console.log('✌️logPayload --->', logPayload);
 
+      // const hasInvalidFields = requiredFields.some((field) => {
+      //   const value = logPayload[field];
+      //   return (
+      //     value === null ||
+      //     value === undefined ||
+      //     (typeof value === 'number' && isNaN(value))
+      //   );
+      // });
+      // console.log('✌️hasInvalidFields --->', hasInvalidFields);
       const hasInvalidFields = requiredFields.some((field) => {
         const value = logPayload[field];
-        return (
-          value === null ||
-          value === undefined ||
-          (typeof value === "number" && isNaN(value))
-        );
+
+        if (value === null) {
+          console.log(`❌ Invalid field: "${field}" → value is null`);
+          return true;
+        }
+
+        if (value === undefined) {
+          console.log(
+            `❌ Invalid field: "${field}" → value is undefined (missing in payload)`,
+          );
+          return true;
+        }
+
+        if (typeof value === "number" && isNaN(value)) {
+          console.log(`❌ Invalid field: "${field}" → value is NaN`);
+          return true;
+        }
+
+        console.log(`✅ Valid field: "${field}" → ${value}`);
+        return false;
       });
+
+      console.log("✌️ hasInvalidFields --->", hasInvalidFields);
 
       if (hasInvalidFields) {
         const keysToCopy = [
@@ -526,13 +629,166 @@ export class LogService {
           description: description,
           updatedBy: new mongoose.Types.ObjectId(userId),
         });
+
+        return badLog;
       }
 
       const newLog = await this.logsModel.create(logPayload);
 
-      const updatedAt = newLog["updatedAt"] as Date;
-      const createdAt = newLog["createdAt"] as Date;
-      // console.log('✌️newLog --->', newLog);
+      // const companyUsers = await this.userModel.find({
+      //   companyId: newLog.companyId,
+      //   isActive: true,
+      //   isDeleted: false,
+      // });
+
+      // if (companyUsers.length > 0) {
+      //   for (const user of companyUsers) {
+      //     if (!user.alerts?.general?.conditions?.length) continue;
+
+      //     const { conditions, notifyBy } = user.alerts.general;
+      //     console.log("✌️conditions, notifyBy --->", conditions, notifyBy);
+
+      //     for (const condition of conditions) {
+      //       console.log("✌️generalAlert --->", condition);
+      //     }
+      //   }
+      // }
+      const companyUsers = await this.userModel.find({
+        companyId: newLog.companyId,
+        isActive: true,
+        isDeleted: false,
+      });
+
+      if (process.env.APP_ENV != "local") {
+        if (companyUsers.length > 0) {
+          for (const user of companyUsers) {
+            // Skip if user has no general alert conditions
+            if (!user.alerts?.general?.conditions?.length) continue;
+
+            const { conditions, notifyBy } = user.alerts.general;
+
+            let isUserEligible = false;
+
+            switch (user.role) {
+              case "corporateManager":
+                // Corporate managers get alerts for all chillers under their company
+                isUserEligible = true;
+                break;
+
+              case "facilityManager":
+                // Facility managers only get alerts if the log's chiller belongs to their facilityIds
+                if (
+                  user.facilityIds?.length &&
+                  user.facilityIds.some(
+                    (fid) => newLog.facilityId?.toString() === fid.toString(),
+                  )
+                ) {
+                  isUserEligible = true;
+                }
+                break;
+
+              case "operator":
+                // Operators only get alerts if the log's chiller belongs to their chillerIds
+                if (
+                  user.chillerIds?.length &&
+                  user.chillerIds.some(
+                    (cid) => newLog.chillerId?.toString() === cid.toString(),
+                  )
+                ) {
+                  isUserEligible = true;
+                }
+                break;
+            }
+
+            if (!isUserEligible) continue;
+
+            // ✅ Evaluate each condition against the new log
+            for (const condition of conditions) {
+              const { metric, warning, alert } = condition;
+
+              const metricValue = newLog[metric];
+              if (metricValue === undefined || metricValue === null) continue;
+
+              const checkCondition = (
+                operator: string,
+                threshold: number,
+              ): boolean => {
+                switch (operator) {
+                  case ">":
+                    return metricValue > threshold;
+                  case "<":
+                    return metricValue < threshold;
+                  case ">=":
+                    return metricValue >= threshold;
+                  case "<=":
+                    return metricValue <= threshold;
+                  case "=":
+                    return metricValue === threshold;
+                  default:
+                    return false;
+                }
+              };
+
+              let severity: "warning" | "alert" | null = null;
+
+              if (checkCondition(alert.operator, alert.threshold)) {
+                severity = "alert";
+              } else if (checkCondition(warning.operator, warning.threshold)) {
+                severity = "warning";
+              }
+
+              const facility = await this.facilityModel.findOne({
+                _id: newLog.facilityId,
+              });
+
+              const chiller = await this.chillerModel.findOne({
+                _id: newLog.chillerId,
+              });
+
+              if (severity) {
+                const message = `Chiller ${chiller.serialNumber} at Facility ${facility.name} triggered a ${severity.toUpperCase()} for metric "${metric}" with value ${metricValue}`;
+                const html = generalAlertNotificationTemplate(message);
+                // Send notifications based on notifyBy value
+                if (notifyBy === "email" || notifyBy === "both") {
+                  // await this.notificationService.sendEmail(
+                  //   user.email,
+                  //   'Chiller Alert Notification',
+                  //   `Hello ${user.firstName} ${user.lastName},\n\n${message}\n\nThanks.`
+                  // );
+
+                  this.logger.debug(`📧 Sending EMAIL to ${user.email}`);
+
+                  await this.emailService.emailSender({
+                    to: user.email,
+                    subject: "General Alerts",
+                    html: html,
+                  });
+                }
+
+                if (notifyBy === "web" || notifyBy === "both") {
+                  this.logger.debug(
+                    `🌐 Sending WEB notification to ${user.email}`,
+                  );
+
+                  const payload = {
+                    senderId: null,
+                    receiverId: user._id,
+                    title: "General Alerts",
+                    message: message,
+                    type: "General",
+                    redirection: { type: "General" },
+                  };
+
+                  await this.notificationService.sendNotification(
+                    payload.receiverId,
+                    payload,
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
 
       const fullName = `${user.firstName} ${user.lastName}`;
 
@@ -565,11 +821,11 @@ export class LogService {
         search,
         sort_by,
         sort_order = "DESC",
-        companyId,
         facilityId,
-        userId,
+        chillerId,
         peakLoad,
       } = body;
+      let companyId = body.companyId;
 
       if (page <= 0 || limit <= 0) {
         throw TypeExceptions.BadRequestCommonFunction(
@@ -592,8 +848,88 @@ export class LogService {
         );
       }
 
+      const matchObj: FilterQuery<LogsDocument> = { isDeleted: false };
+
+      if (loggedInUser.role == Role.CORPORATE_MANAGER) {
+        if (loggedInUser.companyId) {
+          companyId = loggedInUser.companyId.toString();
+        } else {
+          matchObj._id = { $in: [] };
+        }
+      }
+      if (companyId) {
+        matchObj.companyId = new mongoose.Types.ObjectId(companyId);
+      }
+      let facilityIds = [];
+      let chillerIds = [];
+      if (loggedInUser.role == Role.FACILITY_MANAGER) {
+        if (loggedInUser.companyId) {
+          companyId = loggedInUser.companyId.toString();
+        }
+
+        if (loggedInUser?.facilityIds?.length > 0) {
+          if (loggedInUser.facilityIds && loggedInUser.facilityIds.length) {
+            facilityIds = loggedInUser.facilityIds.map(
+              (id) => new mongoose.Types.ObjectId(id),
+            );
+          }
+        }
+        matchObj.facilityId = { $in: facilityIds };
+      }
+      if (loggedInUser.role == Role.OPERATOR) {
+        if (loggedInUser.companyId) {
+          companyId = loggedInUser.companyId.toString();
+        }
+
+        if (loggedInUser.facilityIds) {
+          if (loggedInUser.facilityIds && loggedInUser.facilityIds.length) {
+            facilityIds = loggedInUser.facilityIds.map(
+              (id) => new mongoose.Types.ObjectId(id),
+            );
+          }
+        }
+        if (loggedInUser.chillerIds) {
+          if (loggedInUser.chillerIds && loggedInUser.chillerIds.length) {
+            chillerIds = loggedInUser.chillerIds.map(
+              (id) => new mongoose.Types.ObjectId(id),
+            );
+          }
+        }
+        matchObj.facilityId = { $in: facilityIds };
+        matchObj.chillerId = { $in: chillerIds };
+      }
+      // Validate and apply facility filter
+      if (facilityId) {
+        const existingFacility = await this.facilityModel.findById(facilityId);
+        if (!existingFacility) {
+          throw TypeExceptions.BadRequestCommonFunction(
+            RESPONSE_ERROR.FACILITY_NOT_FOUND,
+          );
+        }
+        matchObj.facilityId = new mongoose.Types.ObjectId(facilityId);
+        if (loggedInUser.role == Role.OPERATOR) {
+          matchObj.chillerId = { $in: chillerIds };
+        }
+      } else {
+        if (
+          loggedInUser.role == Role.ADMIN ||
+          loggedInUser.role == Role.SUB_ADMIN ||
+          loggedInUser.role == Role.CORPORATE_MANAGER
+        ) {
+          if (facilityIds.length) {
+            matchObj.facilityId = { $in: facilityIds };
+          }
+          if (chillerIds.length) {
+            matchObj.chillerId = { $in: chillerIds };
+          }
+        }
+      }
+      if (chillerId) {
+        matchObj.chillerId = new mongoose.Types.ObjectId(chillerId);
+      }
       const pipeline: any[] = [];
 
+      pipeline.push({ $match: matchObj });
       pipeline.push({
         $lookup: {
           from: TABLE_NAMES.CHILLER,
@@ -632,111 +968,6 @@ export class LogService {
         $unwind: { path: "$user", preserveNullAndEmptyArrays: true },
       });
 
-      // Global filter (e.g., not deleted)
-      // pipeline.push({ $match: { isDeleted: false } });
-
-      switch (loggedInUser.role) {
-        case Role.ADMIN:
-        case Role.SUB_ADMIN:
-          // no further restrictions
-          break;
-
-        case Role.CORPORATE_MANAGER:
-          pipeline.push({
-            $match: {
-              "facility.companyId": new mongoose.Types.ObjectId(
-                loggedInUser.companyId,
-              ),
-            },
-          });
-          console.log("pipeline for corporate manager -->", pipeline);
-          break;
-
-        case Role.FACILITY_MANAGER:
-          if (!loggedInUser.facilityIds || !loggedInUser.facilityIds.length) {
-            return { logList: [], totalRecords: 0 };
-          }
-          pipeline.push({
-            $match: {
-              "facility._id": {
-                $in: loggedInUser.facilityIds.map(
-                  (id) => new mongoose.Types.ObjectId(id),
-                ),
-              },
-            },
-          });
-          break;
-
-        case Role.OPERATOR:
-          if (!loggedInUser.chillerIds || !loggedInUser.chillerIds.length) {
-            return { logList: [], totalRecords: 0 };
-          }
-          pipeline.push({
-            $match: {
-              userId: new mongoose.Types.ObjectId(loggedInUser._id),
-            },
-          });
-          break;
-
-        default:
-          throw TypeExceptions.BadRequestCommonFunction(
-            RESPONSE_ERROR.UNAUTHORIZED_USER,
-          );
-      }
-
-      pipeline.push({ $match: { isDeleted: false } });
-
-      if (userId) {
-        // matchStage.userID = new mongoose.Types.ObjectId(userId);
-        pipeline.push({
-          $match: { userId: new mongoose.Types.ObjectId(userId) },
-        });
-      }
-
-      // const pipeline: any[] = [];
-
-      // Match logs
-      // pipeline.push({ $match: matchStage });
-
-      // Lookup chiller
-      // pipeline.push({
-      //   $lookup: {
-      //     from: TABLE_NAMES.CHILLER,
-      //     localField: 'chillerId',
-      //     foreignField: '_id',
-      //     as: 'chiller',
-      //   },
-      // });
-      // pipeline.push({
-      //   $unwind: { path: '$chiller', preserveNullAndEmptyArrays: true },
-      // });
-
-      // // Lookup facility
-      // pipeline.push({
-      //   $lookup: {
-      //     from: TABLE_NAMES.FACILITY,
-      //     localField: 'chiller.facilityId',
-      //     foreignField: '_id',
-      //     as: 'facility',
-      //   },
-      // });
-      // pipeline.push({
-      //   $unwind: { path: '$facility', preserveNullAndEmptyArrays: true },
-      // });
-
-      // // Lookup user
-      // pipeline.push({
-      //   $lookup: {
-      //     from: TABLE_NAMES.USERS,
-      //     localField: 'userID',
-      //     foreignField: '_id',
-      //     as: 'user',
-      //   },
-      // });
-      // pipeline.push({
-      //   $unwind: { path: '$user', preserveNullAndEmptyArrays: true },
-      // });
-
       // Filter by companyId/facilityId
       if (companyId) {
         const companyExists = await this.companyModel.findById(companyId);
@@ -760,30 +991,6 @@ export class LogService {
         });
       }
 
-      // Add projected fields
-      // pipeline.push({
-      //   $project: {
-      //     _id: 1,
-      //     chillerId: 1,
-      //     userID: 1,
-      //     readingDate: 1,
-      //     updatedAt: 1,
-      //     condAppLoss: 1,
-      //     evapAppLoss: 1,
-      //     nonCondLoss: 1,
-      //     chillerName: {
-      //       $concat: [
-      //         { $ifNull: ['$chiller.ChillerNo', ''] },
-      //         ' - ',
-      //         { $ifNull: ['$chiller.model', ''] },
-      //       ],
-      //     },
-
-      //     facilityName: '$facility.name',
-      //     userFirstName: '$user.firstName',
-      //     userLastName: '$user.lastName',
-      //   },
-      // });
       pipeline.push({
         $project: {
           // Include all fields from the Logs document
@@ -865,16 +1072,19 @@ export class LogService {
           comp2RunHourStart: 1,
           KWHLoss: 1,
           BTULoss: 1,
+          effLoss: 1,
           CO2: 1,
           otherLoss: 1,
           isDeleted: 1,
           createdAt: 1,
           updatedAt: 1,
+          ChillerNo: "$chiller.ChillerNo",
+          ChillerNumber: "$chiller.ChillerNumber",
 
           // Additional joined data
           chillerName: {
             $concat: [
-              { $ifNull: ["$chiller.ChillerNo", ""] },
+              { $ifNull: ["$chiller.make", ""] },
               " - ",
               { $ifNull: ["$chiller.model", ""] },
             ],
@@ -882,6 +1092,7 @@ export class LogService {
           facilityName: "$facility.name",
           userFirstName: "$user.firstName",
           userLastName: "$user.lastName",
+          userProfileImage: "$user.profileImage",
         },
       });
 
@@ -890,6 +1101,7 @@ export class LogService {
         $addFields: {
           chillerNameLower: { $toLower: "$chillerName" },
           facilityNameLower: { $toLower: "$facilityName" },
+          ChillerNoLower: { $toLower: "$ChillerNo" },
         },
       });
 
@@ -897,8 +1109,22 @@ export class LogService {
         pipeline.push(
           {
             $addFields: {
+              readingDateUTC: {
+                $cond: {
+                  if: { $eq: [{ $type: "$readingDateUTC" }, "string"] },
+                  then: { $toDate: "$readingDateUTC" },
+                  else: "$readingDateUTC",
+                },
+              },
+            },
+          },
+          {
+            $addFields: {
               readingDateOnly: {
-                $dateToString: { format: "%Y-%m-%d", date: "$readingDateUTC" },
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$readingDateUTC",
+                },
               },
               ampsMax: {
                 $max: ["$ampsPhase1", "$ampsPhase2", "$ampsPhase3"],
@@ -914,28 +1140,23 @@ export class LogService {
             },
           },
           {
+            $sort: {
+              loadPercentage: -1,
+            },
+          },
+          {
             $group: {
               _id: {
                 chillerId: "$chillerId",
                 date: "$readingDateOnly",
               },
-              peakLoadId: {
-                $first: {
-                  $arrayElemAt: [
-                    {
-                      $sortArray: {
-                        input: "$ROOT",
-                        sortBy: { loadPercentage: -1 },
-                      },
-                    },
-                    0,
-                  ],
-                },
-              },
+              peakLoad: { $first: "$$ROOT" },
             },
           },
           {
-            $replaceRoot: { newRoot: "$peakLoadId" },
+            $replaceRoot: {
+              newRoot: "$peakLoad",
+            },
           },
         );
       }
@@ -948,6 +1169,7 @@ export class LogService {
         condAppLoss: "condAppLoss",
         evapAppLoss: "evapAppLoss",
         nonCondLoss: "nonCondLoss",
+        ChillerNo: "ChillerNoLower",
       };
 
       const sortField = sortFieldMap[sort_by] || "updatedAt";
@@ -964,11 +1186,11 @@ export class LogService {
         pipeline.push({
           $match: {
             $or: [
-              { "chiller.ChillerNo": { $regex: regex } },
-              { "chiller.model": { $regex: regex } },
-              { "facility.name": { $regex: regex } },
-              { "user.firstName": { $regex: regex } },
-              { "user.lastName": { $regex: regex } },
+              { chillerName: { $regex: regex } },
+              { ChillerNo: { $regex: regex } },
+              { userFirstName: { $regex: regex } },
+              { userLastName: { $regex: regex } },
+              { facilityName: { $regex: regex } },
             ],
           },
         });
@@ -987,16 +1209,204 @@ export class LogService {
       // Execute
       const result = await this.logsModel.aggregate(pipeline);
       console.log("✌️result --->", result);
+      if (!result || result.length === 0) {
+        throw TypeExceptions.BadRequestCommonFunction(
+          RESPONSE_ERROR.FACILITY_NOT_FOUND,
+        );
+      }
+
+      const generalConditions = loggedInUser?.alerts?.general?.conditions || [];
+
+      const evaluateCondition = (
+        value: number,
+        operator: string,
+        threshold: number,
+      ): boolean => {
+        switch (operator) {
+          case ">":
+            return value > threshold;
+          case ">=":
+            return value >= threshold;
+          case "<":
+            return value < threshold;
+          case "<=":
+            return value <= threshold;
+          case "=":
+            return value === threshold;
+          default:
+            return false;
+        }
+      };
+
+      const getLossType = (
+        metric: string,
+        value: number,
+      ): "normal" | "warning" | "alert" => {
+        const condition = generalConditions.find((c) => c.metric === metric);
+        if (!condition) return "normal";
+
+        const { warning, alert } = condition;
+        if (evaluateCondition(value, alert.operator, alert.threshold))
+          return "alert";
+        if (evaluateCondition(value, warning.operator, warning.threshold))
+          return "warning";
+        return "normal";
+      };
+
+      const log = result[0];
+      console.log("✌️log --->", log);
+
+      // const formatLogs = (logs: any[], getLossType) => {
+      //   return logs.map((log) => ({
+      //     ...log,
+      //     effLoss: {
+      //       value: log.effLoss ?? 0,
+      //       type: getLossType("efficiencyLoss", log.effLoss ?? 0),
+      //       problem: this.generateProblemSolution(
+      //         "effLoss",
+      //         getLossType("efficiencyLoss", log.effLoss ?? 0),
+      //       ),
+      //     },
+      //     condAppLoss: {
+      //       value: log.condAppLoss ?? 0,
+      //       type: getLossType("condenserLoss", log.condAppLoss ?? 0),
+      //       problem: this.generateProblemSolution(
+      //         "condAppLoss",
+      //         getLossType("condenserLoss", log.condAppLoss ?? 0),
+      //       ),
+      //     },
+      //     evapAppLoss: {
+      //       value: log.evapAppLoss ?? 0,
+      //       type: getLossType("evaporatorLoss", log.evapAppLoss ?? 0),
+      //       problem: this.generateProblemSolution(
+      //         "evapAppLoss",
+      //         getLossType("evaporatorLoss", log.evapAppLoss ?? 0),
+      //       ),
+      //     },
+      //     nonCondLoss: {
+      //       value: log.nonCondLoss ?? 0,
+      //       type: getLossType("nonCondenserLoss", log.nonCondLoss ?? 0),
+      //       problem: this.generateProblemSolution(
+      //         "nonCondLoss",
+      //         getLossType("nonCondenserLoss", log.nonCondLoss ?? 0),
+      //       ),
+      //     },
+      //     otherLoss: {
+      //       value: log.otherLoss ?? 0,
+      //       type: getLossType("otherLoss", log.otherLoss ?? 0),
+      //       problem: this.generateProblemSolution(
+      //         "otherLoss",
+      //         getLossType("otherLoss", log.otherLoss ?? 0),
+      //       ),
+      //     },
+      //   }));
+      // };
+      const formatLogs = async (logs: any[], getLossType) => {
+        return Promise.all(
+          logs.map(async (log) => {
+            const effLossType = getLossType("efficiencyLoss", log.effLoss ?? 0);
+            const condLossType = getLossType(
+              "condenserLoss",
+              log.condAppLoss ?? 0,
+            );
+            const evapLossType = getLossType(
+              "evaporatorLoss",
+              log.evapAppLoss ?? 0,
+            );
+            const nonCondLossType = getLossType(
+              "nonCondenserLoss",
+              log.nonCondLoss ?? 0,
+            );
+            const otherLossType = getLossType("otherLoss", log.otherLoss ?? 0);
+
+            return {
+              ...log,
+              effLoss: {
+                value: log.effLoss ?? 0,
+                type: effLossType,
+                problem: await this.generateProblemSolution(
+                  "effLoss",
+                  effLossType,
+                ),
+              },
+              condAppLoss: {
+                value: log.condAppLoss ?? 0,
+                type: condLossType,
+                problem: await this.generateProblemSolution(
+                  "condAppLoss",
+                  condLossType,
+                ),
+              },
+              evapAppLoss: {
+                value: log.evapAppLoss ?? 0,
+                type: evapLossType,
+                problem: await this.generateProblemSolution(
+                  "evapAppLoss",
+                  evapLossType,
+                ),
+              },
+              nonCondLoss: {
+                value: log.nonCondLoss ?? 0,
+                type: nonCondLossType,
+                problem: await this.generateProblemSolution(
+                  "nonCondLoss",
+                  nonCondLossType,
+                ),
+              },
+              otherLoss: {
+                value: log.otherLoss ?? 0,
+                type: otherLossType,
+                problem: await this.generateProblemSolution(
+                  "otherLoss",
+                  otherLossType,
+                ),
+              },
+            };
+          }),
+        );
+      };
+
+      // Usage:
+      // const formattedLogList = formatLogs(log.logList, getLossType);
+      const formattedLogList = await formatLogs.call(
+        this,
+        log.logList,
+        getLossType,
+      );
 
       return {
-        logList: result[0]?.logList || [],
-        totalRecords: result[0]?.totalRecords?.[0]?.count || 0,
+        logList: formattedLogList || [],
+        totalRecords: formattedLogList?.length || 0,
       };
+      // return formattedLog;
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
   }
-
+  async generateProblemSolution(key, type) {
+    try {
+      const problemSolution = [];
+      if (type === "alert" || type === "warning") {
+        const lossFields = [
+          { key: "effLoss", field: "Efficiency Loss %" },
+          { key: "condAppLoss", field: "Cond. App. Loss %" },
+          { key: "evapAppLoss", field: "Evap. App. Loss %" },
+          { key: "nonCondLoss", field: "Non-Cond. Loss %" },
+          { key: "otherLoss", field: "Other Losses %" },
+        ];
+        const probSol = lossFields.find((item) => item.key === key);
+        const ps = await this.problemSolutionModel.findOne({
+          section: "Calculated",
+          field: probSol?.field,
+        });
+        if (ps) return [ps];
+      }
+      return [];
+    } catch (error) {
+      console.error("Error in generateProblemSolution:", error);
+      return [];
+    }
+  }
   async findOne(id: string, loggedInUserId: string) {
     try {
       const loggedInUser = await this.userModel.findById(
@@ -1074,7 +1484,7 @@ export class LogService {
       pipeline.push({
         $lookup: {
           from: TABLE_NAMES.USERS,
-          localField: "chiller.userId",
+          localField: "userId",
           foreignField: "_id",
           as: "user",
         },
@@ -1216,10 +1626,28 @@ export class LogService {
           isDeleted: 1,
           createdAt: 1,
           updatedAt: 1,
+          companyId: 1,
+          facilityId: 1,
+          comp1RunHourStart: 1,
+          comp2RunHourStart: 1,
+          comp1RunHours: 1,
+          comp2RunHours: 1,
+          effLoss: 1,
+          // user: 1,
+          userProfileImage: "$user.profileImage",
+          // userName: '$user.firstName',
 
           // Derived metadata
+          ChillerNo: "$chiller.ChillerNo",
+          ChillerNumber: "$chiller.ChillerNumber",
+
+          // Additional joined data
           chillerName: {
-            $concat: ["$chiller.ChillerNo", " - ", "$chiller.model"],
+            $concat: [
+              { $ifNull: ["$chiller.make", ""] },
+              " - ",
+              { $ifNull: ["$chiller.model", ""] },
+            ],
           },
           facilityName: "$facility.name",
           companyName: "$company.name",
@@ -1237,7 +1665,103 @@ export class LogService {
         );
       }
 
-      return result[0];
+      const log = result[0];
+      console.log("✌️log --->", log);
+
+      // Previous Log
+      const prevLog = await this.logsModel
+        .findOne({
+          isDeleted: false, // ✅ apply globally
+          $or: [
+            { createdAt: { $gt: log.createdAt } },
+            {
+              createdAt: log.createdAt,
+              _id: { $gt: log._id }, // in case timestamps are the same
+            },
+          ],
+        })
+        .sort({ createdAt: 1, _id: 1 });
+
+      // Next Log L
+      const nextLog = await this.logsModel
+        .findOne({
+          isDeleted: false, // ✅ apply globally
+          $or: [
+            { createdAt: { $lt: log.createdAt } },
+            {
+              createdAt: log.createdAt,
+              _id: { $lt: log._id }, // in case timestamps are the same
+            },
+          ],
+        })
+        .sort({ createdAt: -1, _id: -1 });
+      const generalConditions = loggedInUser?.alerts?.general?.conditions || [];
+
+      const evaluateCondition = (
+        value: number,
+        operator: string,
+        threshold: number,
+      ): boolean => {
+        switch (operator) {
+          case ">":
+            return value > threshold;
+          case ">=":
+            return value >= threshold;
+          case "<":
+            return value < threshold;
+          case "<=":
+            return value <= threshold;
+          case "=":
+            return value === threshold;
+          default:
+            return false;
+        }
+      };
+
+      const getLossType = (
+        metric: string,
+        value: number,
+      ): "normal" | "warning" | "alert" => {
+        const condition = generalConditions.find((c) => c.metric === metric);
+        if (!condition) return "normal";
+
+        const { warning, alert } = condition;
+        if (evaluateCondition(value, alert.operator, alert.threshold))
+          return "alert";
+        if (evaluateCondition(value, warning.operator, warning.threshold))
+          return "warning";
+        return "normal";
+      };
+
+      console.log("prevLog: ", prevLog);
+      console.log("nextLog: ", nextLog);
+      const formattedLog = {
+        ...log,
+        nextLogId: nextLog?._id || null,
+        prevLogId: prevLog?._id || null,
+        effLoss: {
+          value: log.effLoss ?? 0,
+          type: getLossType("efficiencyLoss", log.effLoss ?? 0),
+        },
+        condAppLoss: {
+          value: log.condAppLoss ?? 0,
+          type: getLossType("condenserLoss", log.condAppLoss ?? 0),
+        },
+        evapAppLoss: {
+          value: log.evapAppLoss ?? 0,
+          type: getLossType("evaporatorLoss", log.evapAppLoss ?? 0),
+        },
+        nonCondLoss: {
+          value: log.nonCondLoss ?? 0,
+          type: getLossType("nonCondenserLoss", log.nonCondLoss ?? 0),
+        },
+        otherLoss: {
+          value: log.otherLoss ?? 0,
+          type: getLossType("otherLoss", log.otherLoss ?? 0),
+        },
+      };
+
+      return formattedLog;
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
@@ -1384,7 +1908,11 @@ export class LogService {
     );
 
     updatedLog.evapAppLoss = LogRecordHelper.roundToFourDecimals(
-      LogRecordHelper.calcEvapAppLoss(updatedLog, chiller),
+      await LogRecordHelper.calcEvapAppLoss(
+        updatedLog,
+        chiller,
+        this.conversionModel,
+      ),
     );
 
     updatedLog.nonCondLoss = LogRecordHelper.roundToFourDecimals(
@@ -1409,18 +1937,18 @@ export class LogService {
       ),
     );
 
-    updatedLog.actualCost = costPerHour;
+    // updatedLog.actualCost = costPerHour;
     updatedLog.condInletLossCost = LogRecordHelper.roundToFourDecimals(
       updatedLog.condInletLoss * costPerHour,
     );
     updatedLog.condAppLossCost = LogRecordHelper.roundToFourDecimals(
-      updatedLog.condAppLoss * costPerHour,
+      updatedLog.condAppLoss * updatedLog.targetCost * 0.01,
     );
     updatedLog.evapTempLossCost = LogRecordHelper.roundToFourDecimals(
       updatedLog.evapTempLoss * costPerHour,
     );
     updatedLog.evapAppLossCost = LogRecordHelper.roundToFourDecimals(
-      updatedLog.evapAppLoss * costPerHour,
+      updatedLog.evapAppLoss * updatedLog.targetCost * 0.01,
     );
     updatedLog.nonCondLossCost = LogRecordHelper.roundToFourDecimals(
       updatedLog.nonCondLoss * costPerHour,
@@ -1437,8 +1965,21 @@ export class LogService {
       updatedLog.nonCondLossCost +
       updatedLog.deltaLossCost;
 
+    // updatedLog.totalLoss = LogRecordHelper.roundToFourDecimals(
+    //   updatedLog.actualCost + updatedLog.lossCost
+    // );
+
     updatedLog.totalLoss = LogRecordHelper.roundToFourDecimals(
-      updatedLog.actualCost + updatedLog.lossCost,
+      updatedLog.condInletLoss +
+        updatedLog.condAppLoss +
+        updatedLog.evapTempLoss +
+        updatedLog.evapAppLoss +
+        updatedLog.nonCondLoss +
+        updatedLog.deltaLoss,
+    );
+
+    updatedLog.actualCost = LogRecordHelper.roundToFourDecimals(
+      (1 + updatedLog.totalLoss * 0.01) * updatedLog.targetCost,
     );
 
     updatedLog.effLoss = Number(updatedLog.totalLoss?.toFixed(2));
@@ -1573,7 +2114,7 @@ export class LogService {
       LogRecordHelper.calcBTULoss(updatedLog),
     );
     updatedLog.CO2 = LogRecordHelper.roundToFourDecimals(
-      LogRecordHelper.calcCO2(updatedLog),
+      LogRecordHelper.calcCO2(updatedLog, chiller.emissionFactor),
     );
 
     updatedLog.altitudeCorrection = LogRecordHelper.roundToFourDecimals(
@@ -1584,12 +2125,16 @@ export class LogService {
     );
 
     // Final sanitation
-    const sanitizedLog = LogRecordHelper.sanitizeLogData(updatedLog, chiller);
+    // const sanitizedLog = LogRecordHelper.sanitizeLogData(updatedLog, chiller);
 
     updatedLog.otherLoss =
       updatedLog.condInletLoss + updatedLog.evapTempLoss + updatedLog.deltaLoss;
 
-    await this.logsModel.updateOne({ _id: id }, { $set: sanitizedLog });
+    delete updatedLog.chillerId;
+    delete updatedLog.facilityId;
+    delete updatedLog.userId;
+    delete updatedLog.companyId;
+    await this.logsModel.updateOne({ _id: id }, { $set: updatedLog });
 
     const result = await this.logsModel.findById(id);
     const updatedAt = result["updatedAt"] as Date;
@@ -1628,13 +2173,144 @@ export class LogService {
   }
   async exportSelectedLogsExcel(body: ExportLogIds) {
     try {
-      console.log("body: ", body);
+      const pipeline = [];
+      const matchObj: FilterQuery<LogsDocument> = { isDeleted: false };
+
+      const logIds = body?.logIds?.map((id) => new mongoose.Types.ObjectId(id));
+      matchObj._id = { $in: logIds };
+
+      pipeline.push({ $match: matchObj });
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.CHILLER,
+          localField: "chillerId",
+          foreignField: "_id",
+          as: "chiller",
+        },
+      });
+      pipeline.push({
+        $unwind: { path: "$chiller", preserveNullAndEmptyArrays: false },
+      });
+
+      // Lookup facility from chiller
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.FACILITY,
+          localField: "chiller.facilityId",
+          foreignField: "_id",
+          as: "facility",
+        },
+      });
+      pipeline.push({
+        $unwind: { path: "$facility", preserveNullAndEmptyArrays: false },
+      });
+
+      // Lookup user
+      pipeline.push({
+        $lookup: {
+          from: TABLE_NAMES.USERS,
+          localField: "userId",
+          foreignField: "_id",
+          as: "user",
+        },
+      });
+      pipeline.push({
+        $unwind: { path: "$user", preserveNullAndEmptyArrays: true },
+      });
+
+      const result = await this.logsModel.aggregate(pipeline);
+      console.log("result: ", result);
+      if (result.length) {
+        const rows = [];
+        const column = [];
+
+        for (const e of result) {
+          const formattedCreatedDate = dayjs(e.createdAt).format(
+            "MM/DD/YY HH:mm",
+          );
+          const formattedDate = dayjs(e.updatedAt).format("MM/DD/YY HH:mm");
+
+          const deductionExcelRes = {
+            Creator: e?.user?.firstName + " " + e?.user?.lastName,
+            "Created At": formattedCreatedDate,
+            "Facility Name": e?.facility?.name || "",
+            "Chiller Name - Make & Model":
+              (e?.chiller.ChillerNo || "") +
+                " - " +
+                (e?.chiller.make || "") +
+                " " +
+                (e?.chiller.model || "") || "",
+            "Updated At": formattedDate,
+            "Efficiency Loss %": e?.effLoss,
+            "Cond. App. Loss %": e?.condAppLoss,
+            "Evap. App. Loss %": e?.evapAppLoss,
+            "Non-Cond. App. Loss %": e?.nonCondLoss,
+            "Other Losses %": e?.otherLoss,
+          };
+          rows.push(Object.values(deductionExcelRes));
+          column.push(deductionExcelRes);
+        }
+        const book = new Workbook();
+        const sheet = book.addWorksheet(`sheet1`);
+        rows.unshift(Object.keys(column[0]));
+        sheet.addRows(rows);
+
+        const headerRow = sheet.getRow(1);
+        headerRow.eachCell((cell) => {
+          cell.font = { bold: true };
+        });
+        headerRow.commit();
+
+        const buffer = await book.xlsx.writeBuffer();
+
+        const uploadFolderPathNew = "tmp-chiller-check/logs";
+        const fileName = `exportLogExcel_${Date.now()}.xlsx`;
+        const filePath = `${uploadFolderPathNew}/${fileName}`;
+        if (!fs.existsSync(uploadFolderPathNew)) {
+          fs.mkdirSync(uploadFolderPathNew, { recursive: true });
+        }
+        await fs.promises.writeFile(filePath, Buffer.from(buffer));
+        const moduleName = "logs";
+        const mimetype =
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        // Send onboarding email with credentials
+        if (
+          process.env.APP_ENV === AppEnvironment.DEVELOPMENT ||
+          process.env.APP_ENV === AppEnvironment.PRODUCTION
+        ) {
+          const resultFile = await this.imageService.uploadS3(
+            buffer,
+            fileName,
+            moduleName,
+            mimetype,
+          );
+          return resultFile;
+        } else {
+          return {
+            name: fileName,
+          };
+        }
+      } else {
+        return { message: "No Records found." };
+      }
     } catch (error) {
+      console.log("error:------- ", error);
       throw CustomError.UnknownError(error?.message, error?.status);
     }
   }
-  async importLogExcel(file: FileUploadLogDto) {
+
+  // Helper function to validate range
+  isOutOfRange(value: any, min: number, max: number): boolean {
+    const num = Number(value);
+    return isNaN(num) || num < min || num > max;
+  }
+
+  async importLogExcel(file: FileUploadLogDto, req?: Request) {
     try {
+      console.log("✌️file --->", file);
+      const loggedInUser = await this.userModel.findOne({
+        id: req["user"]["_id"],
+      });
       if (!file) {
         throw AuthExceptions.chooseFile();
       }
@@ -1648,6 +2324,10 @@ export class LogService {
       const headers = headerRow.values;
 
       const data: any[] = [];
+      const newLog = [];
+      const badLog = [];
+      const seenLogs = new Set();
+
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber === 1) return; // Skip header row
         const rowData: any = {};
@@ -1655,10 +2335,880 @@ export class LogService {
           const header = headers[colNumber];
           rowData[header] = cell.value;
         });
-        data.push(rowData);
+        // Format Reading Time to AM/PM using moment
+        let formattedTime;
+        if (rowData["Reading Time"]) {
+          const rawTime = rowData["Reading Time"];
+          const parsed = dayjs(rawTime, ["hh:mm A", "HH:mm"], true); // strict parsing
+
+          if (!parsed.isValid()) {
+            throw new Error("Invalid time value");
+          }
+          formattedTime = parsed.utc().format("HH:mm");
+
+          // const date = new Date(rowData["Reading Time"]);
+          // formattedTime = dayjs(date).utc().format("hh:mm A");
+        }
+
+        // Create unique key from all 5 fields to check for duplicates
+        const uniqueKey = `${rowData["Serial Number"]}_${rowData["Chiller Name"]}_${rowData["Reading Date"]}_${formattedTime}_${rowData["Reading Timezone"]}`;
+        console.log("uniqueKey: ", uniqueKey);
+
+        if (!seenLogs.has(uniqueKey)) {
+          seenLogs.add(uniqueKey);
+          data.push(rowData);
+        }
+        // data.push(rowData);
       });
-      return data;
+      console.log("data: ", data);
+      const keysToCopy = [
+        "readingDate",
+        "readingDateUTC",
+        "condInletTemp",
+        "condOutletTemp",
+        "condRefrigTemp",
+        "condPressure",
+        "condAPDrop",
+        "evapInletTemp",
+        "evapOutletTemp",
+        "evapRefrigTemp",
+        "evapPressure",
+        "evapAPDrop",
+        "ampsPhase1",
+        "ampsPhase2",
+        "ampsPhase3",
+        "voltsPhase1",
+        "voltsPhase2",
+        "voltsPhase3",
+        "oilPresHigh",
+        "oilPresLow",
+        "oilPresDif",
+        "oilSumpTemp",
+        "oilLevel",
+        "bearingTemp",
+        "runHours",
+        "purgeTimeHr",
+        "purgeTimeMin",
+        "userNote",
+        "airTemp",
+      ];
+
+      for (const element of data) {
+        let isBadLog = false;
+        console.log("element: ", element);
+        const findChiller = await this.chillerModel.findOne({
+          serialNumber: element["Serial Number"],
+          ChillerNo: element["Chiller Name"],
+        });
+        const insertObject = {};
+        // Insert new logs
+        insertObject["chillerId"] = findChiller?._id;
+        insertObject["userId"] = loggedInUser?._id;
+        insertObject["companyId"] = findChiller?.companyId;
+        insertObject["facilityId"] = findChiller?.facilityId;
+
+        insertObject["airTemp"] = element["Outside Air Temp."];
+        insertObject["runHours"] = element["Chiller Run Hours"];
+        insertObject["runHourStart"] = element["Begin Recording Run Hours"]; // boolean
+        if (element["Begin Recording Run Hours"]) {
+          if (element["Begin Recording Run Hours"].toLowerCase() == "yes") {
+            insertObject["runHourStart"] = true; // boolean
+          } else if (
+            element["Begin Recording Run Hours"].toLowerCase() == "no"
+          ) {
+            insertObject["runHourStart"] = false; // boolean
+          }
+        }
+        insertObject["userNote"] = element["Operator Notes"];
+        insertObject["condInletTemp"] = element["Condenser Inlet Temp."];
+        insertObject["condOutletTemp"] = element["Condenser Outlet Temp."];
+        insertObject["condRefrigTemp"] = element["Condenser Refrig Temp."];
+
+        insertObject["condPressure"] = element["Condenser Pressure"];
+        insertObject["condAPDrop"] = element["Condenser Pressure Drop"];
+        insertObject["evapInletTemp"] = element["Evaporator Inlet Temp."];
+        insertObject["evapOutletTemp"] = element["Evaporator Outlet Temp."];
+        insertObject["evapRefrigTemp"] = element["Evaporator Refrig Temp."];
+        insertObject["evapPressure"] = element["Evaporator Pressure"];
+        insertObject["evapAPDrop"] = element["Evaporator Pressure Drop"];
+
+        insertObject["oilPresHigh"] = element["Oil Press High"];
+        insertObject["oilPresLow"] = element["Oil Press Low"];
+        insertObject["oilPresDif"] = element["Oil Press Diff"];
+
+        insertObject["oilSumpTemp"] = element["Sump Temp."];
+        insertObject["oilLevel"] = element["Oil Level"];
+        insertObject["bearingTemp"] = element["Bearing Temp."];
+
+        insertObject["comp1RunHours"] = element["Comp1 Run Hours"];
+        insertObject["comp1RunHourStart"] = element["Comp1 Run Hours Start"];
+        if (element["Comp1 Run Hours Start"]) {
+          if (element["Comp1 Run Hours Start"].toLowerCase() == "yes") {
+            insertObject["comp1RunHourStart"] = true; // boolean
+          } else if (element["Comp1 Run Hours Start"].toLowerCase() == "no") {
+            insertObject["comp1RunHourStart"] = false; // boolean
+          }
+        }
+
+        insertObject["comp2RunHours"] = element["Comp2 Run Hours"];
+        insertObject["comp2RunHourStart"] = element["Comp2 Run Hours Start"];
+        if (element["Comp2 Run Hours Start"]) {
+          if (element["Comp2 Run Hours Start"].toLowerCase() == "yes") {
+            insertObject["comp2RunHourStart"] = true; // boolean
+          } else if (element["Comp2 Run Hours Start"].toLowerCase() == "no") {
+            insertObject["comp2RunHourStart"] = false; // boolean
+          }
+        }
+
+        insertObject["purgeTimeHr"] = element["Purge Time Hours"];
+        insertObject["purgeTimeMin"] = element["Purge Time Minutes"];
+        let purgeTime = 0;
+
+        if (findChiller?.purgeReadingUnit == PURGE_READING_UNIT["Min. only"]) {
+          purgeTime = insertObject["purgeTimeMin"] || 0;
+        } else {
+          const purgeTimeMinTemp = this.isNumeric(element["Purge Time Minutes"])
+            ? element["Purge Time Minutes"]
+            : 0;
+          const purgeTimeHrTemp = this.isNumeric(element["Purge Time Hours"])
+            ? element["Purge Time Hours"]
+            : 0;
+          purgeTime = purgeTimeHrTemp * 60 + purgeTimeMinTemp;
+        }
+
+        console.log("findChiller: ", findChiller);
+        if (findChiller) {
+          const isMetric =
+            findChiller.unit == MEASUREMENT_UNITS.SIMetric ? true : false;
+
+          // Define valid ranges for temperature and pressure readings
+          const rangeChecks: { [key: string]: [number, number] } = {
+            condInletTemp: [40, 105],
+            condOutletTemp: [40, 105],
+            condPressure: [-18, 33],
+            condAPDrop: [0, 115],
+            evapInletTemp: [-60, 80],
+            evapOutletTemp: [-60, 80],
+            evapRefrigTemp: [-60, 80],
+            evapPressure: [-50, 2],
+            evapAPDrop: [0, 115],
+            oilPresHigh: [0, 200],
+          };
+
+          // Loop through each key and validate
+          for (const [key, [min, max]] of Object.entries(rangeChecks)) {
+            if (insertObject[key]) {
+              const value = Number(insertObject[key]);
+              if (isNaN(value) || value < min || value > max) {
+                console.log("value:----- ", value);
+                console.log("BREAK-1");
+
+                isBadLog = true;
+                break;
+              }
+            }
+          }
+          if (!findChiller.useEvapRefrigTemp) {
+            // Oil pressure high must be between 0 and 200.
+            if (
+              Number(insertObject["condRefrigTemp"]) < 0 ||
+              Number(insertObject["condRefrigTemp"]) > 200
+            ) {
+              console.log("value:----- ", insertObject["condRefrigTemp"]);
+              console.log("BREAK-2");
+
+              isBadLog = true;
+            }
+          }
+          // const date = new Date(element["Reading Time"]);
+
+          // const formattedTime = dayjs(date).utc().format("hh:mm A");
+          const readingDate = element["Reading Date"]; // "08-06-2025"
+          const readingTime = element["Reading Time"]; // "01:00 PM"
+          const timeZoneRaw = element["Reading Timezone"]; // "EST"
+          const timeZoneMap: Record<string, string> = {
+            EST: "America/New_York",
+            PST: "America/Los_Angeles",
+            CST: "America/Chicago",
+            MST: "America/Denver",
+            AKST: "America/Anchorage",
+            HST: "Pacific/Honolulu", // Hawaii
+            AST: "America/Halifax", // Atlantic (Canada)
+            NST: "America/St_Johns", // Newfoundland
+          };
+
+          const timeZone = timeZoneMap[timeZoneRaw] || "UTC";
+          const dateTimeString = `${readingDate} ${readingTime}`;
+
+          const localTime = dayjs.tz(
+            dateTimeString,
+            "MM-DD-YYYY hh:mm A",
+            timeZone,
+          );
+          const utcTime = localTime.utc().toISOString();
+          insertObject["readingDateUTC"] = utcTime;
+          // find existing log with same date
+          console.log("findChiller?._id: ", findChiller?._id);
+          console.log("utcTime: -----", utcTime);
+          const findExistingLogWithSameDate = await this.logsModel.findOne({
+            chillerId: findChiller?._id,
+            readingDateUTC: utcTime.toString(),
+            isDeleted: false,
+          });
+          console.log(
+            "findExistingLogWithSameDate: ",
+            findExistingLogWithSameDate,
+          );
+          if (findExistingLogWithSameDate) {
+            // Skip main log creation for existing dates
+            continue;
+          }
+          insertObject["readingDate"] = element["Reading Date"];
+          // insertObject["readingDateUTC"] = LogRecordHelper.convertToUTCString(
+          //   element["Reading Date"],
+          //   rawTime,
+          //   element["Reading Timezone"]
+          // );
+
+          // Set default values
+          insertObject["ampsPhase1"] = 0;
+          insertObject["ampsPhase2"] = 0;
+          insertObject["ampsPhase3"] = 0;
+          insertObject["voltsPhase1"] = 0;
+          insertObject["voltsPhase2"] = 0;
+          insertObject["voltsPhase3"] = 0;
+
+          // Handle amps
+          const ampChoice = findChiller.ampChoice;
+          if (ampChoice === "1-Phase" || ampChoice === "Enter % Load") {
+            insertObject["ampsPhase1"] = element["Amps Phase 1"];
+            if (this.isOutOfRange(insertObject["ampsPhase1"], 0, 30)) {
+              console.log("BREAK-3");
+              isBadLog = true;
+            }
+          } else if (ampChoice === "3-Phase") {
+            insertObject["ampsPhase1"] = element["Amps Phase 1"];
+            insertObject["ampsPhase2"] = element["Amps Phase 2"];
+            insertObject["ampsPhase3"] = element["Amps Phase 3"];
+            if (
+              this.isOutOfRange(insertObject["ampsPhase1"], 0, 30) ||
+              this.isOutOfRange(insertObject["ampsPhase2"], 0, 30) ||
+              this.isOutOfRange(insertObject["ampsPhase3"], 0, 30)
+            ) {
+              console.log("BREAK-4");
+              isBadLog = true;
+            }
+          }
+
+          // Handle volts
+          const voltageChoice = findChiller.voltageChoice;
+          if (voltageChoice === "1-Phase") {
+            insertObject["voltsPhase1"] = element["Volts Phase 1"];
+            if (this.isOutOfRange(insertObject["voltsPhase1"], 255, 345)) {
+              console.log("BREAK-5");
+              isBadLog = true;
+            }
+          } else if (voltageChoice === "3-Phase") {
+            insertObject["voltsPhase1"] = element["Volts Phase 1"];
+            insertObject["voltsPhase2"] = element["Volts Phase 2"];
+            insertObject["voltsPhase3"] = element["Volts Phase 3"];
+            if (
+              this.isOutOfRange(insertObject["voltsPhase1"], 255, 345) ||
+              this.isOutOfRange(insertObject["voltsPhase2"], 255, 345) ||
+              this.isOutOfRange(insertObject["voltsPhase3"], 255, 345)
+            ) {
+              console.log("BREAK-6");
+              isBadLog = true;
+            }
+          }
+
+          const previousLog = await this.logsModel
+            .findOne({
+              chillerId: new mongoose.Types.ObjectId(findChiller._id),
+              readingDate: { $lt: new Date(insertObject["readingDate"]) },
+              runHours: { $ne: null },
+              isValid: { $ne: true },
+            })
+            .sort({ readingDate: -1 })
+            .select({ runHours: 1, readingDate: 1 });
+
+          if (previousLog) {
+            insertObject["lastRunHours"] = previousLog.runHours;
+            insertObject["lastRunHoursReadingDate"] = new Date(
+              previousLog.readingDate,
+            ).getTime();
+          }
+
+          const nextLog = await this.logsModel
+            .findOne({
+              chillerId: new mongoose.Types.ObjectId(findChiller._id),
+              readingDate: { $gt: new Date(insertObject["readingDate"]) },
+              runHours: { $ne: null },
+              isValid: { $ne: true },
+            })
+            .sort({ readingDate: 1 })
+            .select({ runHours: 1, readingDate: 1 });
+
+          if (nextLog) {
+            insertObject["nextRunHours"] = nextLog.runHours;
+            insertObject["nextRunHoursReadingDate"] = new Date(
+              nextLog.readingDate,
+            ).getTime();
+          }
+
+          insertObject["condInletLoss"] = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calcCondInletLoss(insertObject as never, isMetric),
+          );
+
+          insertObject["condAppLoss"] = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calcCondAppLoss(insertObject as never, findChiller),
+          );
+
+          const condApproach = LogRecordHelper.getCondenserApproach(
+            insertObject as never,
+            findChiller,
+          );
+          console.log(
+            'insertObject["condApproach"]: ',
+            insertObject["condApproach"],
+          );
+          console.log("condApproach: ", condApproach);
+          insertObject["condApproach"] = LogRecordHelper.roundToFourDecimals(
+            insertObject["condApproach"] ?? condApproach,
+          );
+          insertObject["condAppVariance"] =
+            insertObject["condAppVariance"] ??
+            LogRecordHelper.roundToFourDecimals(
+              LogRecordHelper.getCondAppVariance(
+                insertObject as never,
+                findChiller,
+              ),
+            );
+
+          const actualLoad = (insertObject["actualLoad"] =
+            LogRecordHelper.roundToFourDecimals(
+              LogRecordHelper.getLoadFactor(
+                insertObject as never,
+                findChiller,
+                LogRecordHelper.roundToFourDecimals(
+                  LogRecordHelper.getMaxAmp(insertObject as never),
+                ),
+              ),
+            ) * 100);
+
+          insertObject["actualLoad"] = actualLoad.toFixed(4);
+          insertObject["evapTempLoss"] = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calcEvapTempLoss(
+              insertObject as never,
+              findChiller,
+            ),
+          );
+          insertObject["evapAppLoss"] = LogRecordHelper.roundToFourDecimals(
+            await LogRecordHelper.calcEvapAppLoss(
+              insertObject as never,
+              findChiller,
+              this.conversionModel,
+            ),
+          );
+          insertObject["nonCondLoss"] = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calcNonCondLoss(insertObject as never, findChiller),
+          );
+
+          const { deltaLoss, condFlow } = LogRecordHelper.calcDeltaLoss(
+            insertObject as never,
+            findChiller,
+          );
+          insertObject["deltaLoss"] =
+            LogRecordHelper.roundToFourDecimals(deltaLoss);
+          insertObject["condFlow"] =
+            LogRecordHelper.roundToFourDecimals(condFlow);
+
+          insertObject["targetCost"] = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calculateAnnualTargetCost(findChiller),
+          );
+          const costPerHour = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calculateTargetCostPerHour(
+              findChiller,
+              insertObject["energyCost"],
+            ),
+          );
+          // insertObject['actualCost'] = costPerHour;
+
+          insertObject["condInletLossCost"] =
+            LogRecordHelper.roundToFourDecimals(
+              insertObject["condInletLoss"] * costPerHour,
+            );
+          insertObject["condAppLossCost"] = LogRecordHelper.roundToFourDecimals(
+            insertObject["condAppLoss"] * insertObject["targetCost"] * 0.01,
+          );
+          insertObject["evapTempLossCost"] =
+            LogRecordHelper.roundToFourDecimals(
+              insertObject["evapTempLoss"] * costPerHour,
+            );
+          insertObject["evapAppLossCost"] = LogRecordHelper.roundToFourDecimals(
+            insertObject["evapAppLoss"] * insertObject["targetCost"] * 0.01,
+          );
+          insertObject["nonCondLossCost"] = LogRecordHelper.roundToFourDecimals(
+            insertObject["nonCondLoss"] * costPerHour,
+          );
+          insertObject["deltaLossCost"] = LogRecordHelper.roundToFourDecimals(
+            insertObject["deltaLoss"] * costPerHour,
+          );
+          insertObject["lossCost"] =
+            insertObject["condInletLossCost"] +
+            insertObject["condAppLossCost"] +
+            insertObject["evapTempLossCost"] +
+            insertObject["evapAppLossCost"] +
+            insertObject["nonCondLossCost"] +
+            insertObject["deltaLossCost"];
+
+          // insertObject['totalLoss'] = LogRecordHelper.roundToFourDecimals(
+          //   insertObject['actualCost'] + insertObject['lossCost']
+          // );
+          insertObject["totalLoss"] = LogRecordHelper.roundToFourDecimals(
+            insertObject["condInletLoss"] +
+              insertObject["condAppLoss"] +
+              insertObject["evapTempLoss"] +
+              insertObject["evapAppLoss"] +
+              insertObject["nonCondLoss"] +
+              insertObject["deltaLoss"],
+          );
+
+          insertObject["actualCost"] = LogRecordHelper.roundToFourDecimals(
+            (1 + insertObject["totalLoss"] * 0.01) * insertObject["targetCost"],
+          );
+
+          insertObject["effLoss"] = Number(
+            insertObject["totalLoss"]?.toFixed(2),
+          );
+
+          insertObject["energyCost"] = findChiller.energyCost;
+
+          insertObject["evapFlow"] = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calcEvapFlow(insertObject as never, findChiller),
+          );
+
+          insertObject["calculatedEvapRefrigTemp"] =
+            LogRecordHelper.roundToFourDecimals(
+              await LogRecordHelper.calcEvapRefrigTemp(
+                insertObject as never,
+                findChiller,
+                this.conversionModel,
+              ),
+            );
+          const finalEvapRefrigTemp = LogRecordHelper.getFinalRefrigTemp(
+            insertObject as never,
+            findChiller,
+            insertObject["calculatedEvapRefrigTemp"],
+          );
+
+          insertObject["evapRefrigTemp"] =
+            LogRecordHelper.roundToFourDecimals(finalEvapRefrigTemp);
+
+          const evapApproach = LogRecordHelper.getEvapApproach(
+            insertObject as never,
+            findChiller,
+            finalEvapRefrigTemp,
+          );
+          insertObject["evapApproach"] = Number(evapApproach.toFixed(4));
+
+          console.log("insertObject --->", insertObject);
+          insertObject["evapAppVariance"] = LogRecordHelper.roundToFourDecimals(
+            await LogRecordHelper.getEvapAppVariance(
+              insertObject as never,
+              findChiller,
+              this.conversionModel,
+            ),
+          );
+
+          const { EFLCondAppLoss, EFLEvapAppLoss } = LogRecordHelper.getEFLLoss(
+            insertObject as never,
+            findChiller,
+          );
+          insertObject["EFLCondAppLoss"] =
+            LogRecordHelper.roundToFourDecimals(EFLCondAppLoss);
+          insertObject["EFLEvapAppLoss"] =
+            LogRecordHelper.roundToFourDecimals(EFLEvapAppLoss);
+
+          const { ampImbalance, voltImbalance } =
+            LogRecordHelper.checkImbalances(insertObject as never, findChiller);
+
+          insertObject["ampImbalance"] =
+            LogRecordHelper.roundToFourDecimals(ampImbalance);
+          insertObject["voltImbalance"] =
+            LogRecordHelper.roundToFourDecimals(voltImbalance);
+
+          switch (findChiller.compOPIndicator) {
+            case OIL_PRESSURE_DIFF["Enter High and Low Pressures"]:
+              insertObject["oilPresDif"] = 0;
+              break;
+
+            case OIL_PRESSURE_DIFF["Enter High Pressure Only"]:
+              insertObject["oilPresLow"] = 0;
+              insertObject["oilPresDif"] = 0;
+              break;
+
+            case OIL_PRESSURE_DIFF["Enter Differential Directly"]:
+              insertObject["oilPresHigh"] = 0;
+              insertObject["oilPresLow"] = 0;
+              break;
+
+            case OIL_PRESSURE_DIFF["Do Not Log Lube System"]:
+              insertObject["oilPresHigh"] = 0;
+              insertObject["oilPresLow"] = 0;
+              insertObject["oilPresDif"] = 0;
+              insertObject["oilSumpTemp"] = 0;
+              insertObject["oilLevel"] = 0;
+              break;
+
+            default:
+              // Any other case (if exists)
+              insertObject["oilPresHigh"] = 0;
+              insertObject["oilPresLow"] = 0;
+              insertObject["oilPresDif"] = 0;
+              break;
+          }
+          if (findChiller.haveBearingTemp) {
+            insertObject["bearingTemp"] = element["Bearing Temp."];
+          } else {
+            insertObject["bearingTemp"] = 0;
+          }
+
+          const finalOilDiff = LogRecordHelper.getFinalOilDiff(
+            insertObject as never,
+            findChiller,
+          );
+          insertObject["finalOilDiff"] =
+            LogRecordHelper.roundToFourDecimals(finalOilDiff);
+
+          const { nonCondensables, thisCondRefrigTemp } =
+            await LogRecordHelper.getNonCondensables(
+              insertObject as never,
+              findChiller,
+              this.conversionModel,
+            );
+
+          insertObject["nonCondensables"] =
+            LogRecordHelper.roundToFourDecimals(nonCondensables);
+
+          if (findChiller.highPressureRefrig) {
+            insertObject["calculatedCondRefrigTemp"] =
+              LogRecordHelper.roundToFourDecimals(thisCondRefrigTemp);
+          }
+
+          insertObject["validRunHours"] =
+            await LogRecordHelper.validateRunHoursField(
+              insertObject as never,
+              findChiller,
+            );
+
+          insertObject["KWHLoss"] = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calcKWHLoss(insertObject as never),
+          );
+
+          insertObject["BTULoss"] = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calcBTULoss(insertObject as never),
+          );
+
+          insertObject["CO2"] = LogRecordHelper.roundToFourDecimals(
+            LogRecordHelper.calcCO2(
+              insertObject as never,
+              findChiller.emissionFactor,
+            ),
+          );
+          const facility = await this.facilityModel.findById({
+            _id: findChiller.facilityId,
+          });
+
+          insertObject["altitudeCorrection"] =
+            LogRecordHelper.roundToFourDecimals(
+              await LogRecordHelper.getAltitudeCorrectionByLocation(
+                facility,
+                this.altCorrectionModel,
+              ),
+            );
+          if (insertObject?.["numberOfCompressors"] == 1) {
+            insertObject["comp1RunHours"] = element["Comp1 Run Hours"];
+            insertObject["comp2RunHours"] = undefined;
+            insertObject["comp1RunHourStart"] =
+              element["Comp1 Run Hours Start"];
+            insertObject["comp2RunHourStart"] = undefined;
+          } else if (insertObject?.["numberOfCompressors"] == 2) {
+            insertObject["comp1RunHours"] = element["Comp1 Run Hours"];
+            insertObject["comp1RunHourStart"] =
+              element["Comp1 Run Hours Start"];
+            insertObject["comp2RunHours"] = element["Comp2 Run Hours"];
+            insertObject["comp2RunHourStart"] =
+              element["Comp2 Run Hours Start"];
+          }
+
+          insertObject["otherLoss"] =
+            insertObject["condInletLoss"] +
+            insertObject["evapTempLoss"] +
+            insertObject["deltaLoss"];
+
+          const logPayload = {
+            ...insertObject,
+            purgeTimeMin: purgeTime,
+            updatedBy: loggedInUser._id,
+            chillerId: new mongoose.Types.ObjectId(findChiller._id),
+            isLogManual: false,
+          };
+          console.log("✌️logPayload --->", logPayload);
+
+          // const hasInvalidFields = requiredFields.some((field) => {
+          //   const value = logPayload[field];
+          //   return (
+          //     value === null ||
+          //     value === undefined ||
+          //     (typeof value === "number" && isNaN(value))
+          //   );
+          // });
+          // console.log("hasInvalidFields: ", hasInvalidFields);
+          const hasInvalidFields = requiredFields.some((field) => {
+            const value = logPayload[field];
+
+            if (value === null) {
+              console.log(`❌ Invalid field: "${field}" → value is null`);
+              return true;
+            }
+
+            if (value === undefined) {
+              console.log(
+                `❌ Invalid field: "${field}" → value is undefined (missing in payload)`,
+              );
+              return true;
+            }
+
+            if (typeof value === "number" && isNaN(value)) {
+              console.log(`❌ Invalid field: "${field}" → value is NaN`);
+              return true;
+            }
+
+            console.log(`✅ Valid field: "${field}" → ${value}`);
+            return false;
+          });
+
+          console.log("✌️ hasInvalidFields --->", hasInvalidFields);
+          console.log("isBadLog: ", isBadLog);
+          if (hasInvalidFields || isBadLog) {
+            const badLogData = {
+              chillerID: logPayload["chillerId"]?.toString(),
+              userId: logPayload["userId"]?.toString(),
+              updatedBy: logPayload.updatedBy,
+              ...Object.fromEntries(
+                keysToCopy.map((key) => [key, logPayload[key]]),
+              ),
+            };
+
+            const badLog = await this.badLogModel.create(badLogData);
+
+            const title = "New Bad Log Entry";
+
+            const fullName = loggedInUser
+              ? `${loggedInUser.firstName} ${loggedInUser.lastName}`
+              : "Unknown User";
+
+            const description = generateTimelineDescription(title, {
+              updatedBy: fullName,
+              entryNotes: badLog.userNote,
+              logId: badLog._id.toString(),
+            });
+
+            await this.timelineModel.create({
+              chillerId: findChiller._id,
+              title: title,
+              description: description,
+              updatedBy: loggedInUser?._id,
+            });
+            // ✅ Skip main log creation for bad log
+            continue;
+          }
+          logPayload["chillerId"] = new mongoose.Types.ObjectId(findChiller.id);
+
+          const newLog = await this.logsModel.create(logPayload);
+
+          const fullName = `${loggedInUser.firstName} ${loggedInUser.lastName}`;
+
+          const title = "New Log Entry";
+
+          const description = generateTimelineDescription(title, {
+            logId: newLog._id.toString(),
+            updatedBy: fullName,
+            entryNotes: newLog.userNote,
+          });
+
+          await this.timelineModel.create({
+            chillerId: findChiller._id,
+            title,
+            description,
+            updatedBy: loggedInUser?._id,
+          });
+
+          const companyUsers = await this.userModel.find({
+            companyId: newLog.companyId,
+            isActive: true,
+            isDeleted: false,
+          });
+
+          console.log("✌️process.env.APP_ENV --->", process.env.APP_ENV);
+          if (process.env.APP_ENV != "local") {
+            if (companyUsers.length > 0) {
+              for (const user of companyUsers) {
+                // Skip if user has no general alert conditions
+                if (!user.alerts?.general?.conditions?.length) continue;
+
+                const { conditions, notifyBy } = user.alerts.general;
+
+                let isUserEligible = false;
+
+                switch (user.role) {
+                  case "corporateManager":
+                    // Corporate managers get alerts for all chillers under their company
+                    isUserEligible = true;
+                    break;
+
+                  case "facilityManager":
+                    // Facility managers only get alerts if the log's facility belongs to them
+                    if (
+                      user.facilityIds?.length &&
+                      user.facilityIds.some(
+                        (fid) =>
+                          newLog.facilityId?.toString() === fid.toString(),
+                      )
+                    ) {
+                      isUserEligible = true;
+                    }
+                    break;
+
+                  case "operator":
+                    // Operators only get alerts if the log's chiller belongs to them
+                    if (
+                      user.chillerIds?.length &&
+                      user.chillerIds.some(
+                        (cid) =>
+                          newLog.chillerId?.toString() === cid.toString(),
+                      )
+                    ) {
+                      isUserEligible = true;
+                    }
+                    break;
+                }
+
+                if (!isUserEligible) continue;
+
+                // ✅ Evaluate conditions against newLog
+                for (const condition of conditions) {
+                  const { metric, warning, alert } = condition;
+
+                  const metricValue = newLog[metric];
+                  if (metricValue === undefined || metricValue === null)
+                    continue;
+
+                  const checkCondition = (
+                    operator: string,
+                    threshold: number,
+                  ): boolean => {
+                    switch (operator) {
+                      case ">":
+                        return metricValue > threshold;
+                      case "<":
+                        return metricValue < threshold;
+                      case ">=":
+                        return metricValue >= threshold;
+                      case "<=":
+                        return metricValue <= threshold;
+                      case "=":
+                        return metricValue === threshold;
+                      default:
+                        return false;
+                    }
+                  };
+
+                  let severity: "warning" | "alert" | null = null;
+
+                  if (checkCondition(alert.operator, alert.threshold)) {
+                    severity = "alert";
+                  } else if (
+                    checkCondition(warning.operator, warning.threshold)
+                  ) {
+                    severity = "warning";
+                  }
+
+                  if (severity) {
+                    const facility = await this.facilityModel.findById(
+                      newLog.facilityId,
+                    );
+                    const chiller = await this.chillerModel.findById(
+                      newLog.chillerId,
+                    );
+
+                    const message = `Chiller ${chiller?.serialNumber} at Facility ${facility?.name} triggered a ${severity.toUpperCase()} for metric "${metric}" with value ${metricValue}`;
+
+                    // Send EMAIL
+                    if (notifyBy === "email" || notifyBy === "both") {
+                      this.logger.debug(`📧 Sending EMAIL to ${user.email}`);
+                      await this.emailService.emailSender({
+                        to: user.email,
+                        subject: "General Alerts",
+                        html: `
+                <p>Hello ${user.firstName} ${user.lastName},</p>
+                <p>${message}</p>
+                <p>Thanks,</p>
+              `,
+                      });
+                    }
+
+                    // Send WEB notification
+                    if (notifyBy === "web" || notifyBy === "both") {
+                      this.logger.debug(
+                        `🌐 Sending WEB notification to ${user.email}`,
+                      );
+                      const payload = {
+                        senderId: null,
+                        receiverId: user._id,
+                        title: "General Alerts",
+                        message,
+                        type: "General",
+                        redirection: { type: "General" },
+                      };
+                      await this.notificationService.sendNotification(
+                        payload.receiverId,
+                        payload,
+                      );
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          const logPayload = {
+            ...insertObject,
+            purgeTimeMin: purgeTime,
+            updatedBy: loggedInUser?._id,
+            chillerId: findChiller
+              ? new mongoose.Types.ObjectId(findChiller?._id)
+              : "",
+          };
+
+          // Insert in Bad Logs
+          const badLogData = {
+            chillerID: logPayload?.["chillerId"]?.toString(),
+            userId: logPayload["userId"]?.toString(),
+            updatedBy: logPayload.updatedBy,
+            ...Object.fromEntries(
+              keysToCopy.map((key) => [key, logPayload[key]]),
+            ),
+          };
+
+          console.log("badLogData: -------", badLogData);
+          await this.badLogModel.create(badLogData);
+        }
+      }
+      return [];
     } catch (error) {
+      console.log("error: ", error);
       throw CustomError.UnknownError(error?.message, error?.status);
     }
   }

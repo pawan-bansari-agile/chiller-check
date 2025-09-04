@@ -11,7 +11,7 @@ export const failedLoginAttemptsTemplate = (
 <html lang="en">
 
 <head>
-    <title>Chiller check</title>
+    <title>Chiller Check</title>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -99,47 +99,34 @@ export const failedLoginAttemptsTemplate = (
                 <td style="padding:30px 50px 40px;">
                     <table style="border: 0;border-spacing:0;">
                         <tr>
-                            <td style="justify-content: center;display: flex;font-weight: 700;font-size: 20px;color: #101112;line-height: 25px;">
-                                3 Failed Attempts - User Inactivated
+                            <td style="text-align: center;display: inline-block;width: 100%;font-weight: 700;font-size: 20px;color: #101112;line-height: 25px;padding-bottom: 55px;">
+                                <span style="border-bottom: 1px solid #00a86b;padding-bottom: 10px;">3 Failed Attempts - User Inactivated</span>
                             </td>
                         </tr>
-                        <tr><td><hr></td></tr>
                         <tr>
-                            <td style="font-weight: 700;font-size: 16px;color: #101112;line-height: 25px;text-align: center;">
+                            <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;text-align: left;padding-bottom: 25px;">
                                 Hi ${recipientName},
                             </td>
                         </tr>
-                        <tr><td><br/></td></tr>
                         <tr>
-                            <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;text-align: center;">
+                            <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;text-align: left;">
                                 The ${userRole} - ${userFullName} has been inactivated due to 3 failed login attempts within 1 hour.
                             </td>
                         </tr>
-                    </table>
-                </td>
-            </tr>
-            <tr>
-                <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;padding-top:15px;text-align: center;">
+                        <tr>
+                          <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;padding-top:15px;text-align: left;">
                     You can contact them outside the system & activate them back from the user management module.
                 </td>
-            </tr>
-            <tr>
-                <td style="padding:45px 50px 60px;">
-                    <table style="border: 0;border-spacing:0;">
-                        <tr>
-                            <td style="font-weight: 600;font-size: 17px;color: #404040;line-height: 23px;">
-                                Thanks, <span style="display: block;">The Chiller check Team</span>
-                            </td>
-                        </tr>
+                </tr>
                     </table>
                 </td>
             </tr>
             <tr>
-                <td style="padding:0 ;">
-                    <table style="border: 0;border-spacing:0;width: 100%;text-align: center;">
+                <td style="padding:0px 50px 60px;">
+                    <table style="border: 0;border-spacing:0;">
                         <tr>
-                            <td style="padding:10px;background-color: #13132A;font-weight: 400;font-size: 13px;letter-spacing: 0.5px;color: #FFFFFF;">
-                                Copyright ©2025 Chiller check | All Rights Reserved
+                            <td style="font-weight: 400;font-size: 17px;color: #404040;line-height: 23px;">
+                                Thanks.
                             </td>
                         </tr>
                     </table>
