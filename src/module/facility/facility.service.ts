@@ -1423,7 +1423,13 @@ export class FacilityService {
           ? NotificationRedirectionType.FACILITY_ACTIVATED
           : NotificationRedirectionType.FACILITY_INACTIVATED;
 
-        const message = `The Facility - ${facility.name} has been ${info} also all the chillers under it are also inactivated. The log entries already entered will remain as they are, just they won't be a part of the calculations anymore.`;
+        const role = userRoleName(loggedInUser.role);
+
+        const userName = `${loggedInUser.firstName} ${loggedInUser.lastName}`;
+
+        const message = facility.isActive
+          ? `Facility - ${facility.name} has been activated. All the chillers under this facility are still inactivated. The activation was done by ${role} - ${userName}.`
+          : `The Facility - ${facility.name} has been ${info} also all the chillers under it are also inactivated. The log entries already entered will remain as they are, just they won't be a part of the calculations anymore.`;
         const payload = {
           senderId: null,
           receiverId: companyManager._id,

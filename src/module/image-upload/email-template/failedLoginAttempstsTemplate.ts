@@ -132,6 +132,17 @@ export const failedLoginAttemptsTemplate = (
                     </table>
                 </td>
             </tr>
+            <tr>
+                <td style="padding:0;">
+                    <table style="border: 0; border-spacing: 0; width: 100%; text-align: center;">
+                        <tr>
+                            <td style="padding:10px; background-color: #13132A; font-weight: 400; font-size: 13px; letter-spacing: 0.5px; color: #FFFFFF;">
+                                Copyright ©2025 Chiller Check | All Rights Reserved
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
         </table>
     </div>
 </body>
