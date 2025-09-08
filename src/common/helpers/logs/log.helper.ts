@@ -571,6 +571,7 @@ export class LogRecordHelper {
     return loss;
   }
 
+  // Working code do not delete.
   static calcNonCondLoss(log: Logs, chiller: Chiller): number {
     const temp = log.condInletTemp ?? 0;
     const pressure = log.condPressure ?? 0;
@@ -582,6 +583,51 @@ export class LogRecordHelper {
     // log.nonCondLoss = nonCondLoss;
     return nonCondLoss;
   }
+
+  // static async calcNonCondLoss(
+  //   log: Logs,
+  //   chiller: Chiller,
+  //   conversionModel: Model<Conversion>,
+  //   conversionData: any, // pass in same way ColdFusion does
+  // ): Promise<number> {
+  //   // Step 1: Get non-condensables value (implement similar to ColdFusion getNonCondensables)
+  //   const { nonCondensables } = await this.getNonCondensables(
+  //     log,
+  //     chiller,
+  //     conversionModel,
+  //     conversionData,
+  //   );
+
+  //   let nonCondLoss = 0;
+  //   let multiplierConstant = 5;
+
+  //   // Step 2: If no non-condensables → no loss
+  //   if (nonCondensables <= 0) {
+  //     nonCondLoss = 0;
+  //   } else {
+  //     // Step 3: Convert multiplier constant from native unit to PSIG
+  //     // (ColdFusion converts FROM chiller unit TO PSIG)
+  //     if (chiller.condPressureUnit !== "PSIA") {
+  //       multiplierConstant = this.convertPressure(
+  //         chiller.condPressureUnit,
+  //         "PSIG",
+  //         multiplierConstant,
+  //       );
+  //     }
+
+  //     // Step 4: Multiply by constant
+  //     nonCondLoss = nonCondensables * multiplierConstant;
+  //   }
+
+  //   // Step 5: Safeguard — ignore small values
+  //   if (nonCondLoss < 2) {
+  //     nonCondLoss = 0;
+  //   }
+
+  //   // Step 6: return (ColdFusion sets on logRecord)
+  //   // log.nonCondLoss = nonCondLoss;
+  //   return nonCondLoss;
+  // }
 
   static calcDeltaLossOld(log: Logs, chiller: Chiller): number {
     const losses = [
@@ -1924,13 +1970,22 @@ export class LogRecordHelper {
   ) {
     const avgEnergyCost = this.getAverageEnergyCostForRange(logRecords);
     console.log("✌️avgEnergyCost --->", avgEnergyCost);
-    const averages = this.getAveragesForRange(logRecords, useRunHours);
-    console.log("✌️averages --->", averages);
-
-    // const chiller = { isMetric: false, isSteam: false }; // Replace with actual chiller object
     const chiller = await chillerModel.findOne({
       _id: new mongoose.Types.ObjectId(logRecords[0].chillerId),
     });
+
+    let averages;
+    // = this.getAveragesForRange(logRecords, useRunHours);
+    if (chiller.unit == MEASUREMENT_UNITS.English) {
+      averages = this.getAveragesForRange(logRecords, useRunHours);
+    } else if (chiller.unit == MEASUREMENT_UNITS.SIMetric) {
+      averages = this.getAveragesForRange(logRecords, useRunHours, {
+        metricMode: true,
+      });
+    }
+    console.log("✌️averages --->", averages);
+
+    // const chiller = { isMetric: false, isSteam: false }; // Replace with actual chiller object
     // console.log('✌️chiller --->', chiller);
 
     const performance: any = {
@@ -2087,11 +2142,107 @@ export class LogRecordHelper {
   //   };
   // }
 
-  static getAveragesForRange(logRecords: any[], useRunHours: boolean) {
-    let totalLoss = 0;
-    let totalOtherLoss = 0;
-    let totalExcessCondApp = 0;
-    let totalExcessEvapApp = 0;
+  // Working function do not delete.
+  // static getAveragesForRange(logRecords: any[], useRunHours: boolean) {
+  //   let totalLoss = 0;
+  //   let totalOtherLoss = 0;
+  //   let totalExcessCondApp = 0;
+  //   let totalExcessEvapApp = 0;
+
+  //   if (!logRecords || logRecords.length === 0) {
+  //     return {
+  //       avgLoss: 0,
+  //       avgOtherLoss: 0,
+  //       avgExcessCondApp: 0,
+  //       avgExcessEvapApp: 0,
+  //     };
+  //   }
+
+  //   if (logRecords.length === 1) {
+  //     const r = logRecords[0];
+  //     return {
+  //       avgLoss: r.totalLoss ?? 0,
+  //       avgOtherLoss:
+  //         (r.condInletLoss ?? 0) + (r.deltaLoss ?? 0) + (r.evapTempLoss ?? 0),
+  //       avgExcessCondApp: r.condAppVariance ?? 0,
+  //       avgExcessEvapApp: r.evapAppVariance ?? 0,
+  //     };
+  //   }
+
+  //   const intervals = logRecords.length - 1;
+
+  //   for (let idx = 0; idx < logRecords.length - 1; idx++) {
+  //     const current = logRecords[idx];
+  //     const next = logRecords[idx + 1];
+
+  //     let intervalBetweenReadings = 1;
+
+  //     if (useRunHours) {
+  //       intervalBetweenReadings = Math.abs(
+  //         (next?.runHours ?? 0) - (current?.runHours ?? 0),
+  //       );
+  //     } else {
+  //       const dCurr = dayjs(current?.readingDateUTC);
+  //       const dNext = dayjs(next?.readingDateUTC);
+
+  //       intervalBetweenReadings = Math.abs(dNext.diff(dCurr, "hour"));
+
+  //       // ✅ ColdFusion safeguard: if still 0, treat as 1
+  //       if (intervalBetweenReadings === 0) {
+  //         intervalBetweenReadings = 1;
+  //       }
+  //     }
+
+  //     // --- avg total loss ---
+  //     const a = current?.totalLoss ?? 0;
+  //     const b = next?.totalLoss ?? 0;
+  //     const avgLossForInterval = (Math.min(a, b) + Math.max(a, b)) / 2;
+  //     totalLoss += avgLossForInterval;
+
+  //     // --- avg other loss ---
+  //     const currentOther =
+  //       (current?.deltaLoss ?? 0) +
+  //       (current?.evapTempLoss ?? 0) +
+  //       (current?.condInletLoss ?? 0);
+  //     const nextOther =
+  //       (next?.deltaLoss ?? 0) +
+  //       (next?.evapTempLoss ?? 0) +
+  //       (next?.condInletLoss ?? 0);
+  //     const avgOtherForInterval =
+  //       (Math.min(currentOther, nextOther) +
+  //         Math.max(currentOther, nextOther)) /
+  //       2;
+  //     totalOtherLoss += avgOtherForInterval;
+
+  //     // --- avg cond variance ---
+  //     const avgCondForInterval =
+  //       (Math.min(current?.condAppVariance ?? 0, next?.condAppVariance ?? 0) +
+  //         Math.max(current?.condAppVariance ?? 0, next?.condAppVariance ?? 0)) /
+  //       2;
+  //     totalExcessCondApp += avgCondForInterval;
+
+  //     // --- avg evap variance ---
+  //     const avgEvapForInterval =
+  //       (Math.min(current?.evapAppVariance ?? 0, next?.evapAppVariance ?? 0) +
+  //         Math.max(current?.evapAppVariance ?? 0, next?.evapAppVariance ?? 0)) /
+  //       2;
+  //     totalExcessEvapApp += avgEvapForInterval;
+  //   }
+
+  //   return {
+  //     avgLoss: intervals > 0 ? totalLoss / intervals : 0,
+  //     avgOtherLoss: intervals > 0 ? totalOtherLoss / intervals : 0,
+  //     avgExcessCondApp: intervals > 0 ? totalExcessCondApp / intervals : 0,
+  //     avgExcessEvapApp: intervals > 0 ? totalExcessEvapApp / intervals : 0,
+  //   };
+  // }
+
+  static getAveragesForRange(
+    logRecords: any[],
+    useRunHours: boolean,
+    options?: { metricMode?: boolean }, // ← pass {metricMode: true} for SI/Metric chillers
+  ) {
+    const metricMode = options?.metricMode === true;
 
     if (!logRecords || logRecords.length === 0) {
       return {
@@ -2102,7 +2253,17 @@ export class LogRecordHelper {
       };
     }
 
+    // For metric mode: with a single reading, there’s no interval, so return zeros.
+    // For English mode: preserve your original single-record behaviour.
     if (logRecords.length === 1) {
+      if (metricMode) {
+        return {
+          avgLoss: 0,
+          avgOtherLoss: 0,
+          avgExcessCondApp: 0,
+          avgExcessEvapApp: 0,
+        };
+      }
       const r = logRecords[0];
       return {
         avgLoss: r.totalLoss ?? 0,
@@ -2115,12 +2276,94 @@ export class LogRecordHelper {
 
     const intervals = logRecords.length - 1;
 
+    // --- English (original) path: DO NOT TOUCH EXISTING LOGIC ---
+    if (!metricMode) {
+      let totalLoss = 0;
+      let totalOtherLoss = 0;
+      let totalExcessCondApp = 0;
+      let totalExcessEvapApp = 0;
+
+      for (let idx = 0; idx < logRecords.length - 1; idx++) {
+        const current = logRecords[idx];
+        const next = logRecords[idx + 1];
+
+        let intervalBetweenReadings = 1;
+
+        if (useRunHours) {
+          intervalBetweenReadings = Math.abs(
+            (next?.runHours ?? 0) - (current?.runHours ?? 0),
+          );
+        } else {
+          const dCurr = dayjs(current?.readingDateUTC);
+          const dNext = dayjs(next?.readingDateUTC);
+          intervalBetweenReadings = Math.abs(dNext.diff(dCurr, "hour"));
+
+          // ColdFusion safeguard kept: never allow 0
+          if (intervalBetweenReadings === 0) intervalBetweenReadings = 1;
+        }
+
+        // avg total loss (original midpoint)
+        const a = current?.totalLoss ?? 0;
+        const b = next?.totalLoss ?? 0;
+        const avgLossForInterval = (Math.min(a, b) + Math.max(a, b)) / 2;
+        totalLoss += avgLossForInterval;
+
+        // avg other loss (original midpoint)
+        const currentOther =
+          (current?.deltaLoss ?? 0) +
+          (current?.evapTempLoss ?? 0) +
+          (current?.condInletLoss ?? 0);
+        const nextOther =
+          (next?.deltaLoss ?? 0) +
+          (next?.evapTempLoss ?? 0) +
+          (next?.condInletLoss ?? 0);
+        const avgOtherForInterval =
+          (Math.min(currentOther, nextOther) +
+            Math.max(currentOther, nextOther)) /
+          2;
+        totalOtherLoss += avgOtherForInterval;
+
+        // avg cond variance (original midpoint)
+        const avgCondForInterval =
+          (Math.min(current?.condAppVariance ?? 0, next?.condAppVariance ?? 0) +
+            Math.max(
+              current?.condAppVariance ?? 0,
+              next?.condAppVariance ?? 0,
+            )) /
+          2;
+        totalExcessCondApp += avgCondForInterval;
+
+        // avg evap variance (original midpoint)
+        const avgEvapForInterval =
+          (Math.min(current?.evapAppVariance ?? 0, next?.evapAppVariance ?? 0) +
+            Math.max(
+              current?.evapAppVariance ?? 0,
+              next?.evapAppVariance ?? 0,
+            )) /
+          2;
+        totalExcessEvapApp += avgEvapForInterval;
+      }
+
+      return {
+        avgLoss: intervals > 0 ? totalLoss / intervals : 0,
+        avgOtherLoss: intervals > 0 ? totalOtherLoss / intervals : 0,
+        avgExcessCondApp: intervals > 0 ? totalExcessCondApp / intervals : 0,
+        avgExcessEvapApp: intervals > 0 ? totalExcessEvapApp / intervals : 0,
+      };
+    }
+
+    // --- SI/Metric path: average of CHANGES between points ---
+    let sumDeltaLoss = 0;
+    let sumDeltaOtherLoss = 0;
+    let sumDeltaCondVar = 0;
+    let sumDeltaEvapVar = 0;
+
     for (let idx = 0; idx < logRecords.length - 1; idx++) {
       const current = logRecords[idx];
       const next = logRecords[idx + 1];
 
+      // Keep the same interval calc/guard as original (for compatibility)
       let intervalBetweenReadings = 1;
-
       if (useRunHours) {
         intervalBetweenReadings = Math.abs(
           (next?.runHours ?? 0) - (current?.runHours ?? 0),
@@ -2128,23 +2371,18 @@ export class LogRecordHelper {
       } else {
         const dCurr = dayjs(current?.readingDateUTC);
         const dNext = dayjs(next?.readingDateUTC);
-
         intervalBetweenReadings = Math.abs(dNext.diff(dCurr, "hour"));
-
-        // ✅ ColdFusion safeguard: if still 0, treat as 1
-        if (intervalBetweenReadings === 0) {
-          intervalBetweenReadings = 1;
-        }
+        if (intervalBetweenReadings === 0) intervalBetweenReadings = 1;
       }
 
-      // --- avg total loss ---
+      // totalLoss: use change, so constant values ⇒ 0 contribution
       const a = current?.totalLoss ?? 0;
       const b = next?.totalLoss ?? 0;
-      const avgLossForInterval = (Math.min(a, b) + Math.max(a, b)) / 2;
-      totalLoss += avgLossForInterval;
+      const deltaLoss = b - a;
+      sumDeltaLoss += deltaLoss;
 
-      // --- avg other loss ---
-      const currentOther =
+      // other loss (condInlet + delta + evapTemp): also use change
+      const currOther =
         (current?.deltaLoss ?? 0) +
         (current?.evapTempLoss ?? 0) +
         (current?.condInletLoss ?? 0);
@@ -2152,32 +2390,25 @@ export class LogRecordHelper {
         (next?.deltaLoss ?? 0) +
         (next?.evapTempLoss ?? 0) +
         (next?.condInletLoss ?? 0);
-      const avgOtherForInterval =
-        (Math.min(currentOther, nextOther) +
-          Math.max(currentOther, nextOther)) /
-        2;
-      totalOtherLoss += avgOtherForInterval;
+      sumDeltaOtherLoss += nextOther - currOther;
 
-      // --- avg cond variance ---
-      const avgCondForInterval =
-        (Math.min(current?.condAppVariance ?? 0, next?.condAppVariance ?? 0) +
-          Math.max(current?.condAppVariance ?? 0, next?.condAppVariance ?? 0)) /
-        2;
-      totalExcessCondApp += avgCondForInterval;
+      // condenser approach variance: change
+      const currCondVar = current?.condAppVariance ?? 0;
+      const nextCondVar = next?.condAppVariance ?? 0;
+      sumDeltaCondVar += nextCondVar - currCondVar;
 
-      // --- avg evap variance ---
-      const avgEvapForInterval =
-        (Math.min(current?.evapAppVariance ?? 0, next?.evapAppVariance ?? 0) +
-          Math.max(current?.evapAppVariance ?? 0, next?.evapAppVariance ?? 0)) /
-        2;
-      totalExcessEvapApp += avgEvapForInterval;
+      // evaporator approach variance: change
+      const currEvapVar = current?.evapAppVariance ?? 0;
+      const nextEvapVar = next?.evapAppVariance ?? 0;
+      sumDeltaEvapVar += nextEvapVar - currEvapVar;
     }
 
+    // Average across intervals
     return {
-      avgLoss: intervals > 0 ? totalLoss / intervals : 0,
-      avgOtherLoss: intervals > 0 ? totalOtherLoss / intervals : 0,
-      avgExcessCondApp: intervals > 0 ? totalExcessCondApp / intervals : 0,
-      avgExcessEvapApp: intervals > 0 ? totalExcessEvapApp / intervals : 0,
+      avgLoss: intervals > 0 ? sumDeltaLoss / intervals : 0,
+      avgOtherLoss: intervals > 0 ? sumDeltaOtherLoss / intervals : 0,
+      avgExcessCondApp: intervals > 0 ? sumDeltaCondVar / intervals : 0,
+      avgExcessEvapApp: intervals > 0 ? sumDeltaEvapVar / intervals : 0,
     };
   }
 

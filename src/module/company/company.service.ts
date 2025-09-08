@@ -977,19 +977,6 @@ export class CompanyService {
           trialReminderSent: { $push: "$trialReminderSent" },
         },
       });
-
-      // Lookup all users with role operator for this company
-
-      // Add total counts at company level
-
-      // const [result] = await this.companyModel.aggregate(pipeline);
-      // if (!result) throw CustomError.NotFound('Company not found');
-
-      // return {
-      //   statusCode: 200,
-      //   message: 'Company Found.',
-      //   data: result,
-      // };
       const result = await this.companyModel.aggregate(pipeline);
       if (!result || result.length === 0) {
         throw TypeExceptions.BadRequestCommonFunction(
@@ -1079,11 +1066,15 @@ export class CompanyService {
         // If no latest log, just return the base chiller data (no `latestLog` key)
         return rest;
       });
+      const finalResult =
+        formattedChillers.length === 1 &&
+        Object.keys(formattedChillers[0] || {}).length === 0
+          ? []
+          : formattedChillers;
 
-      // return result.length ? result[0] : [];
       return {
         ...company,
-        chillers: formattedChillers,
+        chillers: finalResult,
       };
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);

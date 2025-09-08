@@ -287,7 +287,7 @@ export function userRoleName(role: string) {
   } else if (role == Role.SUB_ADMIN) {
     return "Sub Admin";
   } else if (role == Role.CORPORATE_MANAGER) {
-    return "Corporate Manager";
+    return "Company Manager";
   } else if (role == Role.FACILITY_MANAGER) {
     return "Facility Manager";
   } else if (role == Role.OPERATOR) {

@@ -283,7 +283,7 @@ export class LogService {
         ),
       );
       logData.nonCondLoss = LogRecordHelper.roundToFourDecimals(
-        LogRecordHelper.calcNonCondLoss(logData, chiller),
+        await LogRecordHelper.calcNonCondLoss(logData, chiller),
       );
 
       const { deltaLoss, condFlow } = LogRecordHelper.calcDeltaLoss(
@@ -1170,6 +1170,8 @@ export class LogService {
         evapAppLoss: "evapAppLoss",
         nonCondLoss: "nonCondLoss",
         ChillerNo: "ChillerNoLower",
+        effLoss: "effLoss",
+        otherLoss: "otherLoss",
       };
 
       const sortField = sortFieldMap[sort_by] || "updatedAt";
@@ -1916,7 +1918,7 @@ export class LogService {
     );
 
     updatedLog.nonCondLoss = LogRecordHelper.roundToFourDecimals(
-      LogRecordHelper.calcNonCondLoss(updatedLog, chiller),
+      await LogRecordHelper.calcNonCondLoss(updatedLog, chiller),
     );
 
     const { deltaLoss, condFlow } = LogRecordHelper.calcDeltaLoss(
@@ -2711,7 +2713,10 @@ export class LogService {
             ),
           );
           insertObject["nonCondLoss"] = LogRecordHelper.roundToFourDecimals(
-            LogRecordHelper.calcNonCondLoss(insertObject as never, findChiller),
+            await LogRecordHelper.calcNonCondLoss(
+              insertObject as never,
+              findChiller,
+            ),
           );
 
           const { deltaLoss, condFlow } = LogRecordHelper.calcDeltaLoss(

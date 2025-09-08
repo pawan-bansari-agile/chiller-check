@@ -104,7 +104,7 @@ export const logAlertTemplate = (
                         </tr>
                         <tr><td><hr></td></tr>
                         <tr>
-                            <td style="font-weight: 700;font-size: 16px;color: #101112;line-height: 25px;text-align: center;">
+                            <td style="font-weight: 700;font-size: 16px;color: #101112;line-height: 25px;text-align: left;">
                                 Hi '${firstName} ${lastName}',
                             </td>
                         </tr>
@@ -112,7 +112,7 @@ export const logAlertTemplate = (
             </tr>
                         <tr><td><br/></td></tr>
                         <tr>
-                            <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;text-align: center;">
+                            <td style="font-weight: 400;font-size: 16px;color: #101112;line-height: 25px;text-align: left;">
                                ${message}
                             </td>
                         </tr>

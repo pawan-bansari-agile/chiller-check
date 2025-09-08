@@ -12,7 +12,7 @@ import {
   MaintenanceDocument,
   MaintenanceRecordsLogs,
 } from "src/common/schema/maintenanceLogs.schema";
-import { Role } from "src/common/constants/enum.constant";
+import { Role, userRoleName } from "src/common/constants/enum.constant";
 import { NotificationService } from "src/common/services/notification.service";
 import { EmailService } from "src/common/helpers/email/email.service";
 import { Chiller, ChillerDocument } from "src/common/schema/chiller.schema";
@@ -210,11 +210,11 @@ export class AlertCronService {
   ) {
     let title = "";
     let message = "";
-
+    const role = userRoleName(user.role);
     if (logAlert.type === "program") {
       // const roleText = Role[user.role];
       title = "User Not Logged In";
-      message = `Please note that the ${user.role.toUpperCase()} - ${user.firstName} ${user.lastName} hasn't logged into the system since last ${logAlert.daysSince} days. You may want to follow up to ensure everything is in order.`;
+      message = `Please note that the ${role} - ${user.firstName} ${user.lastName} hasn't logged into the system since last ${logAlert.daysSince} days. You may want to follow up to ensure everything is in order.`;
     } else {
       const facility = await this.facilityModel
         .findById(chiller.facilityId)
