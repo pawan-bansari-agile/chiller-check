@@ -154,6 +154,7 @@ export class LogController {
   exportSelectedLogsExcel(@Body() body: ExportLogIds) {
     return this.logService.exportSelectedLogsExcel(body);
   }
+
   @Post("importBulkLogExcel")
   @ApiConsumes("multipart/form-data")
   @ResponseMessage(LOGS.LOG_IMPORT)
@@ -165,7 +166,8 @@ export class LogController {
     summary: "Get all import logs",
   })
   @UseInterceptors(FileInterceptor("file"))
-  importLogExcel(@Req() req: Request, @UploadedFile() file: FileUploadLogDto) {
+  importLogExcel(@Req() req, @UploadedFile() file: FileUploadLogDto) {
+    console.log("✌️req from import excell controller--->", req["user"]._id);
     return this.logService.importLogExcel(file, req);
   }
 

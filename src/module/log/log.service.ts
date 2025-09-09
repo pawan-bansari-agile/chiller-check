@@ -1368,6 +1368,11 @@ export class LogService {
         );
       };
 
+      const { logList, totalRecords } = result[0] || {
+        logList: [],
+        totalRecords: [],
+      };
+
       // Usage:
       // const formattedLogList = formatLogs(log.logList, getLossType);
       const formattedLogList = await formatLogs.call(
@@ -1378,7 +1383,7 @@ export class LogService {
 
       return {
         logList: formattedLogList || [],
-        totalRecords: formattedLogList?.length || 0,
+        totalRecords: totalRecords?.length ? totalRecords[0].count : 0,
       };
       // return formattedLog;
     } catch (error) {
@@ -2307,12 +2312,16 @@ export class LogService {
     return isNaN(num) || num < min || num > max;
   }
 
-  async importLogExcel(file: FileUploadLogDto, req?: Request) {
+  async importLogExcel(file: FileUploadLogDto, req) {
     try {
       console.log("✌️file --->", file);
       const loggedInUser = await this.userModel.findOne({
-        id: req["user"]["_id"],
+        _id: new mongoose.Types.ObjectId(req["user"]._id),
       });
+      if (!loggedInUser) {
+        throw AuthExceptions.AccountNotExist();
+      }
+      console.log("✌️loggedInUser --->", loggedInUser);
       if (!file) {
         throw AuthExceptions.chooseFile();
       }
@@ -2340,13 +2349,43 @@ export class LogService {
         // Format Reading Time to AM/PM using moment
         let formattedTime;
         if (rowData["Reading Time"]) {
-          const rawTime = rowData["Reading Time"];
-          const parsed = dayjs(rawTime, ["hh:mm A", "HH:mm"], true); // strict parsing
+          // const rawTime = rowData["Reading Time"];
+          // console.log("✌️rawTime --->", rawTime);
+          // const parsed = dayjs(rawTime, ["hh:mm A"], true); // strict parsing
 
-          if (!parsed.isValid()) {
-            throw new Error("Invalid time value");
+          // if (!parsed.isValid()) {
+          //   console.log("✌️parsed --->", parsed);
+          //   throw new Error("Invalid time value");
+          // }
+          // formattedTime = parsed.utc().format("HH:mm");
+          if (rowData["Reading Time"]) {
+            const rawTime = rowData["Reading Time"];
+
+            if (rawTime instanceof Date) {
+              // Special case: Excel times come with epoch 1899-12-30
+              if (dayjs(rawTime).isBefore("1900-01-01")) {
+                // Only take the time portion
+                formattedTime = dayjs(rawTime).utc().format("HH:mm");
+              } else {
+                // Normal datetime
+                formattedTime = dayjs(rawTime).utc().format("HH:mm");
+              }
+            } else if (typeof rawTime === "number") {
+              // Excel stores times as fraction of a day
+              const excelEpoch = dayjs("1899-12-30");
+              formattedTime = excelEpoch
+                .add(rawTime, "day")
+                .utc()
+                .format("HH:mm");
+            } else if (typeof rawTime === "string") {
+              const parsed = dayjs(rawTime, ["hh:mm A", "HH:mm"], true);
+              if (parsed.isValid()) {
+                formattedTime = parsed.utc().format("HH:mm");
+              } else {
+                throw new Error(`Invalid time value: ${rawTime}`);
+              }
+            }
           }
-          formattedTime = parsed.utc().format("HH:mm");
 
           // const date = new Date(rowData["Reading Time"]);
           // formattedTime = dayjs(date).utc().format("hh:mm A");

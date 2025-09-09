@@ -190,6 +190,7 @@ export class SchedulerService implements OnModuleInit {
           const adminAndSubAdmin = await this.userModel.find({
             role: { $in: [Role.ADMIN, Role.SUB_ADMIN] },
           });
+
           for (const element of adminAndSubAdmin) {
             const adminName = element?.firstName + " " + element?.lastName;
             const html = freeTrialEndingTemplateForAdminSubAdmin(
@@ -203,6 +204,22 @@ export class SchedulerService implements OnModuleInit {
               subject: subject,
               html: html,
             });
+
+            const payload = {
+              senderId: element._id,
+              receiverId: element._id,
+              title: "Company Free Trial Ended",
+              message: `Company - ${companyName}'s free trial has ended so the Company Manager - ${companyManagerName} is logged out automatically. Please reach out for further assistance.`,
+              type: NotificationRedirectionType.COMPANY_FREE_TRIAL_ENDED,
+              redirection: {
+                type: NotificationRedirectionType.COMPANY_FREE_TRIAL_ENDED,
+              },
+            };
+
+            await this.notificationService.sendNotification(
+              payload.receiverId,
+              payload,
+            );
           }
         }
       }

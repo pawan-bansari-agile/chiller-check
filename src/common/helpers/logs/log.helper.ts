@@ -244,7 +244,7 @@ export class LogRecordHelper {
     const localDateTimeStr = `${readingDate} ${readingTime}`; // '07-25-2025 2:17 PM'
     const parsed = dayjs.tz(
       localDateTimeStr,
-      ["MM-DD-YYYY HH:mm", "MM-DD-YYYY h:mm A"],
+      ["MM-DD-YYYY h:mm A"],
       ianaZone,
       true, // strict mode
     );
