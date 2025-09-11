@@ -394,23 +394,29 @@ export class AuthService {
         role: Role.ADMIN,
       },
       {
-        configKey: "database.testUser",
-        logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
-        logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
-        role: Role.ADMIN, // change this role accordingly
+        configKey: "database.larry",
+        logSuccess: RESPONSE_SUCCESS.INITIAL_USER_LOADED,
+        logExists: RESPONSE_SUCCESS.INITIAL_USER_ALREADY_LOADED,
+        role: Role.ADMIN,
       },
-      {
-        configKey: "database.sauravUser",
-        logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
-        logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
-        role: Role.ADMIN, // change this role accordingly
-      },
-      {
-        configKey: "database.Agile",
-        logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
-        logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
-        role: Role.ADMIN, // change this role accordingly
-      },
+      // {
+      //   configKey: "database.testUser",
+      //   logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
+      //   logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
+      //   role: Role.ADMIN, // change this role accordingly
+      // },
+      // {
+      //   configKey: "database.sauravUser",
+      //   logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
+      //   logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
+      //   role: Role.ADMIN, // change this role accordingly
+      // },
+      // {
+      //   configKey: "database.Agile",
+      //   logSuccess: RESPONSE_SUCCESS.TEST_USER_LOADED,
+      //   logExists: RESPONSE_SUCCESS.TEST_USER_ALREADY_LOADED,
+      //   role: Role.ADMIN, // change this role accordingly
+      // },
     ];
     // const user1 = await this.userModel.findOne({
     //   email: this.configService.get("database.initialUser.email"),

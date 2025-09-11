@@ -445,6 +445,7 @@ export class DashboardService {
         facilityId: facilityData.facilityId,
         facilityName: facilityData.facilityName,
         chillerLogs: latestLogs,
+        facilityTimezone: facilityData.facilityTimezone,
       });
     }
 

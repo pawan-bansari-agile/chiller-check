@@ -77,12 +77,22 @@ export class ProblemSolutionService {
             nameLower: { $toLower: "$name" },
           },
         },
-        {
-          $sort: {
-            [sort_by === "section" ? "section" : sort_by || "createdAt"]:
-              sort_order === "ASC" ? 1 : -1,
-          },
-        },
+      );
+
+      const sortField = sort_by || "updatedAt";
+      const sortOrder = sort_order?.toUpperCase() === "ASC" ? 1 : -1;
+
+      pipeline.push({
+        $sort: { [sortField]: sortOrder },
+      });
+
+      pipeline.push(
+        // {
+        //   $sort: {
+        //     [sort_by === "section" ? "section" : sort_by || "createdAt"]:
+        //       sort_order === "ASC" ? 1 : -1,
+        //   },
+        // },
         {
           $project: {
             section: 1,

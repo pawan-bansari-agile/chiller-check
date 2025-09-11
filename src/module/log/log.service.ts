@@ -2518,37 +2518,38 @@ export class LogService {
         }
 
         console.log("findChiller: ", findChiller);
+        // console.log('✌️insertObject --->', insertObject);
         if (findChiller) {
           const isMetric =
             findChiller.unit == MEASUREMENT_UNITS.SIMetric ? true : false;
 
           // Define valid ranges for temperature and pressure readings
-          const rangeChecks: { [key: string]: [number, number] } = {
-            condInletTemp: [40, 105],
-            condOutletTemp: [40, 105],
-            condPressure: [-18, 33],
-            condAPDrop: [0, 115],
-            evapInletTemp: [-60, 80],
-            evapOutletTemp: [-60, 80],
-            evapRefrigTemp: [-60, 80],
-            evapPressure: [-50, 2],
-            evapAPDrop: [0, 115],
-            oilPresHigh: [0, 200],
-          };
+          // const rangeChecks: { [key: string]: [number, number] } = {
+          //   condInletTemp: [40, 105],
+          //   condOutletTemp: [40, 105],
+          //   condPressure: [-18, 33],
+          //   condAPDrop: [0, 115],
+          //   evapInletTemp: [-60, 80],
+          //   evapOutletTemp: [-60, 80],
+          //   evapRefrigTemp: [-60, 80],
+          //   evapPressure: [-50, 2],
+          //   evapAPDrop: [0, 115],
+          //   oilPresHigh: [0, 200],
+          // };
 
           // Loop through each key and validate
-          for (const [key, [min, max]] of Object.entries(rangeChecks)) {
-            if (insertObject[key]) {
-              const value = Number(insertObject[key]);
-              if (isNaN(value) || value < min || value > max) {
-                console.log("value:----- ", value);
-                console.log("BREAK-1");
+          // for (const [key, [min, max]] of Object.entries(rangeChecks)) {
+          //   if (insertObject[key]) {
+          //     const value = Number(insertObject[key]);
+          //     if (isNaN(value) || value < min || value > max) {
+          //       console.log("value:----- ", value);
+          //       console.log("BREAK-1");
 
-                isBadLog = true;
-                break;
-              }
-            }
-          }
+          //       isBadLog = true;
+          //       break;
+          //     }
+          //   }
+          // }
           if (!findChiller.useEvapRefrigTemp) {
             // Oil pressure high must be between 0 and 200.
             if (
@@ -2623,44 +2624,48 @@ export class LogService {
           const ampChoice = findChiller.ampChoice;
           if (ampChoice === "1-Phase" || ampChoice === "Enter % Load") {
             insertObject["ampsPhase1"] = element["Amps Phase 1"];
-            if (this.isOutOfRange(insertObject["ampsPhase1"], 0, 30)) {
-              console.log("BREAK-3");
-              isBadLog = true;
-            }
+            // if (this.isOutOfRange(insertObject["ampsPhase1"], 0, 30)) {
+            //   console.log("BREAK-3");
+            //   isBadLog = true;
+            // }
           } else if (ampChoice === "3-Phase") {
             insertObject["ampsPhase1"] = element["Amps Phase 1"];
             insertObject["ampsPhase2"] = element["Amps Phase 2"];
             insertObject["ampsPhase3"] = element["Amps Phase 3"];
-            if (
-              this.isOutOfRange(insertObject["ampsPhase1"], 0, 30) ||
-              this.isOutOfRange(insertObject["ampsPhase2"], 0, 30) ||
-              this.isOutOfRange(insertObject["ampsPhase3"], 0, 30)
-            ) {
-              console.log("BREAK-4");
-              isBadLog = true;
-            }
+            // if (
+            //   this.isOutOfRange(insertObject["ampsPhase1"], 0, 30) ||
+            //   this.isOutOfRange(insertObject["ampsPhase2"], 0, 30) ||
+            //   this.isOutOfRange(insertObject["ampsPhase3"], 0, 30)
+            // ) {
+            //   console.log("BREAK-4");
+            //   isBadLog = true;
+            // }
           }
 
           // Handle volts
           const voltageChoice = findChiller.voltageChoice;
           if (voltageChoice === "1-Phase") {
             insertObject["voltsPhase1"] = element["Volts Phase 1"];
-            if (this.isOutOfRange(insertObject["voltsPhase1"], 255, 345)) {
-              console.log("BREAK-5");
-              isBadLog = true;
-            }
+            // if (this.isOutOfRange(insertObject["voltsPhase1"], 255, 345)) {
+            //   console.log("BREAK-5");
+            //   isBadLog = true;
+            // }
           } else if (voltageChoice === "3-Phase") {
             insertObject["voltsPhase1"] = element["Volts Phase 1"];
             insertObject["voltsPhase2"] = element["Volts Phase 2"];
             insertObject["voltsPhase3"] = element["Volts Phase 3"];
-            if (
-              this.isOutOfRange(insertObject["voltsPhase1"], 255, 345) ||
-              this.isOutOfRange(insertObject["voltsPhase2"], 255, 345) ||
-              this.isOutOfRange(insertObject["voltsPhase3"], 255, 345)
-            ) {
-              console.log("BREAK-6");
-              isBadLog = true;
-            }
+            // if (
+            //   this.isOutOfRange(insertObject["voltsPhase1"], 255, 345) ||
+            //   this.isOutOfRange(insertObject["voltsPhase2"], 255, 345) ||
+            //   this.isOutOfRange(insertObject["voltsPhase3"], 255, 345)
+            // ) {
+            //   console.log("BREAK-6");
+            //   isBadLog = true;
+            // }
+          } else if (voltageChoice === "Enter % Load") {
+            insertObject["voltsPhase1"] = 0;
+            insertObject["voltsPhase2"] = 0;
+            insertObject["voltsPhase3"] = 0;
           }
 
           const previousLog = await this.logsModel
@@ -2989,6 +2994,14 @@ export class LogService {
           insertObject["otherLoss"] =
             insertObject["condInletLoss"] +
             insertObject["evapTempLoss"] +
+            insertObject["deltaLoss"];
+
+          insertObject["effLossAtFullLoad"] =
+            insertObject["condInletLoss"] +
+            insertObject["EFLCondAppLoss"] +
+            insertObject["evapTempLoss"] +
+            insertObject["EFLEvapAppLoss"] +
+            insertObject["nonCondLoss"] +
             insertObject["deltaLoss"];
 
           const logPayload = {
