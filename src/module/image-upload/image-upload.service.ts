@@ -53,12 +53,15 @@ export class ImageUploadService {
         console.log("file:---- ", file);
         if (
           file &&
-          !file.originalname.match(/\.(jpg|jpeg|png|JPG|json|pdf|doc)$/)
+          // !file.originalname.match(/\.(jpg|jpeg|png|JPG|json|pdf|doc)$/)
+          !file.originalname.match(
+            /\.(jpg|jpeg|png|webp|svg|JPG|JPEG|PNG|GIF|WEBP|SVG|txt|csv|json|pdf|doc|docx|xls|xlsx)$/i,
+          )
         ) {
           return res.status(HttpStatus.BAD_REQUEST).json({
             statusCode: HttpStatus.BAD_REQUEST,
             message:
-              "Only jpg,png,jpeg,pdf,doc,docx,mp4,mov,mkv,webm files are allowed!!",
+              "Only jpg,jpeg,png,webp,svg,JPG,JPEG,PNG,GIF,WEBP,SVG,txt,csv,json,pdf,doc,docx,xls,xlsx files are allowed!!",
             data: false,
           });
         } else {
@@ -106,12 +109,14 @@ export class ImageUploadService {
       for (const file of files) {
         if (
           file &&
-          !file.originalname.match(/\.(jpg|jpeg|png|JPG|json|pdf|doc)$/)
+          !file.originalname.match(
+            /\.(jpg|jpeg|png|webp|svg|JPG|JPEG|PNG|GIF|WEBP|SVG|txt|csv|json|pdf|doc|docx|xls|xlsx)$/,
+          )
         ) {
           return res.status(HttpStatus.BAD_REQUEST).json({
             statusCode: HttpStatus.BAD_REQUEST,
             message:
-              "Only jpg,png,jpeg,pdf,doc,docx,mp4,mov,mkv,webm files are allowed!!",
+              "Only jpg,jpeg,png,webp,svg,JPG,JPEG,PNG,GIF,WEBP,SVG,txt,csv,json,pdf,doc,docx,xls,xlsx files are allowed!!",
             data: false,
           });
         } else {

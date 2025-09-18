@@ -50,7 +50,8 @@ export class GmailService {
 
   async watchInbox() {
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
-    const topicName = `projects/${process.env.GCP_PROJECT_ID}/topics/${process.env.PUBSUB_TOPIC}`;
+    const topicName = `projects/${process.env.CLIENT_GCP_PROJECT_ID}/topics/${process.env.CLIENT_PUBSUB_TOPIC}`;
+    console.log("✌️topicName --->", topicName);
     const res = await gmail.users.watch({
       userId: "me",
       requestBody: {
@@ -183,6 +184,7 @@ export class GmailService {
 
     // 1) atomically claim this historyId for processing
     const filter = {
+      _id: "gmail_state",
       $or: [
         { historyId: { $exists: false } }, // first-time
         {

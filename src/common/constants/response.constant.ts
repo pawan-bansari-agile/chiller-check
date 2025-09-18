@@ -3,7 +3,7 @@ export const RESPONSE_SUCCESS = {
   SUCCESS: "Success.",
   SERVER_RUNNING: "Server is running.",
   USER_LOGIN: "You have successfully logged in to your account.",
-  USER_SEND_OTP: "OTP has been sent to your registered phone number.",
+  USER_SEND_OTP: "OTP has been sent to your registered phone number/email.",
   USER_VERIFY_OTP: "OTP verified successfully.",
   USER_LOGOUT: "You have been logged out of your account successfully.",
   USER_LISTED: "User list fetch successfully.",

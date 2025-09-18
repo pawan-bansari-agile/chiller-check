@@ -17,15 +17,32 @@ const formatPhoneNumber = (phoneNumber: string) => {
   return phoneNumber;
 };
 
-export const sendOTP = async (phoneNumber: string) => {
+export const sendOTP = async (phoneNumber?: string, email?: string) => {
   console.log("phoneNumber: ", phoneNumber);
+  console.log("✌️email --->", email);
   try {
-    const formattedPhoneNumber = formatPhoneNumber(phoneNumber); // Format phone number
-    console.log("✌️formattedPhoneNumber --->", formattedPhoneNumber);
+    let to: string;
+    let channel: "sms" | "email";
+
+    if (phoneNumber) {
+      to = formatPhoneNumber(phoneNumber);
+      channel = "sms";
+    } else if (email) {
+      to = email;
+      channel = "email";
+    } else {
+      throw new Error("Either phoneNumber or email must be provided");
+    }
+
+    console.log("Sending OTP to:", to, "via", channel);
+    console.log("✌️to --->", to);
+
+    // const formattedPhoneNumber = formatPhoneNumber(phoneNumber); // Format phone number
+    // console.log("✌️formattedPhoneNumber --->", formattedPhoneNumber);
 
     const verification = await client.verify.v2
       .services(process.env.VERIFY_SERVICE_SID)
-      .verifications.create({ to: formattedPhoneNumber, channel: "sms" });
+      .verifications.create({ to: to, channel: channel });
 
     return { success: true, sid: verification.sid };
   } catch (error) {
@@ -33,14 +50,31 @@ export const sendOTP = async (phoneNumber: string) => {
     return { success: false, error: error.message };
   }
 };
-export const verifyOTP = async (phoneNumber: string, code: string) => {
+export const verifyOTP = async (
+  code: string,
+  phoneNumber?: string,
+  email?: string,
+) => {
   try {
-    const formattedPhoneNumber = formatPhoneNumber(phoneNumber); // Format phone number
-    console.log("✌️formattedPhoneNumber --->", formattedPhoneNumber);
+    let to: string;
+
+    if (phoneNumber) {
+      to = formatPhoneNumber(phoneNumber);
+    } else if (email) {
+      to = email;
+    } else {
+      throw new Error("Either phoneNumber or email must be provided");
+    }
+
+    console.log("Verifying OTP for:", to);
+    console.log("✌️to --->", to);
+
+    // const formattedPhoneNumber = formatPhoneNumber(phoneNumber); // Format phone number
+    // console.log('✌️formattedPhoneNumber --->', formattedPhoneNumber);
 
     const verificationCheck = await client.verify.v2
       .services(process.env.VERIFY_SERVICE_SID)
-      .verificationChecks.create({ to: formattedPhoneNumber, code });
+      .verificationChecks.create({ to: to, code });
 
     if (verificationCheck.status === "approved") {
       return { success: true };

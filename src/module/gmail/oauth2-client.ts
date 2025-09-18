@@ -1,4 +1,3 @@
-// remove
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { google } from "googleapis";
 import * as fs from "fs";
@@ -9,7 +8,10 @@ import {
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 
-const CREDENTIALS_PATH = path.join(__dirname, "../../../credentials.json");
+const CREDENTIALS_PATH = path.join(
+  __dirname,
+  "../../../clientCredentials.json",
+);
 const s3 = new S3Client({
   region: process.env.S3_REGION || process.env.AWS_REGION,
   credentials: {
@@ -20,7 +22,7 @@ const s3 = new S3Client({
 
 const BUCKET = process.env.S3_BUCKETS!;
 const CREDENTIALS_KEY =
-  process.env.S3_CREDENTIALS_KEY || "gmail-credentials.json";
+  process.env.CLIENT_S3_CREDENTIALS_KEY || "gmail-credentials.json";
 
 const TOKEN_KEY = process.env.S3_TOKEN_KEY || "gmail-token.json";
 
@@ -86,12 +88,30 @@ export let oauth2Client: any;
 (async () => {
   if (process.env.APP_ENV != "local") {
     const credentials = await loadCredentialsFile();
-    const { client_id, client_secret, redirect_uris } = credentials.installed;
+    // const { client_id, client_secret, redirect_uris } = credentials.installed;
+    const { client_id, client_secret } = credentials.web;
+
+    const redirectUris: Record<string, string> = {
+      local: "http://localhost:3000/gmail/oauth2callback",
+      development:
+        "https://node-chiller-check.agiletechnologies.in/gmail/oauth2callback", // can point to same as local
+      staging: "https://stage-be.chillercheck.org/gmail/oauth2callback",
+      production: "https://be.chillercheck.org/gmail/oauth2callback",
+    };
+
+    const env = process.env.APP_ENV || "local";
+    const redirectUri = redirectUris[env];
+
+    if (!redirectUri) {
+      throw new Error(
+        `❌ Invalid APP_ENV="${env}". Expected one of: ${Object.keys(redirectUris).join(", ")}`,
+      );
+    }
 
     oauth2Client = new google.auth.OAuth2(
       client_id,
       client_secret,
-      redirect_uris[0],
+      redirectUri,
     );
 
     const token = await getTokenFromS3();

@@ -245,7 +245,14 @@ export class AuthService {
       if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
         if (!existingDevice) {
           // 🚀 Device not found, trigger OTP
-          const otpResult = await sendOTP(user.phoneNumber);
+          // let otpResult;
+          // if (!user.phoneNumber) {
+          //   otpResult = await sendOTP(user.email);
+          // } else {
+          //   otpResult = await sendOTP(user.phoneNumber);
+          // }
+          const otpResult = await sendOTP(user.phoneNumber, user.email);
+
           if (!otpResult.success) {
             throw new Error("Failed to send OTP: " + otpResult.error);
           }
@@ -305,7 +312,7 @@ export class AuthService {
       if (!user) {
         throw AuthExceptions.AccountNotExist();
       }
-      const otpResult = await sendOTP(user.phoneNumber);
+      const otpResult = await sendOTP(user.phoneNumber, user.email);
       if (!otpResult.success) {
         throw new Error("Failed to send OTP: " + otpResult.error);
       }
@@ -326,7 +333,11 @@ export class AuthService {
 
       if (body.otp !== masterOTP) {
         if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
-          const otpVerifyResult = await verifyOTP(user.phoneNumber, body.otp);
+          const otpVerifyResult = await verifyOTP(
+            body.otp,
+            user.phoneNumber,
+            user.email,
+          );
           if (!otpVerifyResult.success) {
             throw new Error("Please enter valid OTP.");
           }

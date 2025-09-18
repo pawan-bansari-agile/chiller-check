@@ -212,6 +212,7 @@ export class UpdateUserDto {
     message:
       "Phone number must be a valid US number in the format +1XXXXXXXXXX",
   })
+  @IsOptional()
   phoneNumber: string;
 
   @ApiProperty({
