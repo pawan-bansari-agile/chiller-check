@@ -24,6 +24,15 @@ import {
   ProcessedMessageDocument,
 } from "src/common/schema/processed-message.schema";
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+function isDupKeyError(err: any) {
+  const code = (err && (err.code || err.errno)) || null;
+  return (
+    code === 11000 ||
+    (err && err.name === "MongoServerError" && err.code === 11000)
+  );
+}
+
 @Injectable()
 export class GmailService {
   private readonly logger = new Logger(GmailService.name);
@@ -177,66 +186,267 @@ export class GmailService {
     await this.gmailModel.create({ lastHistoryId: historyId });
   }
 
+  // Old working code. Do not delete
+  // async handlePushHistoryId(incomingHistoryId: string) {
+  //   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  //   this.logger.log(`Incoming historyId ${incomingHistoryId}`);
+
+  //   // 1) atomically claim this historyId for processing
+  //   const filter = {
+  //     _id: 'gmail_state',
+  //     $or: [
+  //       { historyId: { $exists: false } }, // first-time
+  //       {
+  //         $and: [
+  //           { historyId: { $lt: incomingHistoryId } },
+  //           { processing: { $ne: true } },
+  //         ],
+  //       }, // not already processing and older
+  //     ],
+  //   };
+
+  //   const update = {
+  //     $set: {
+  //       processing: true,
+  //       processingHistoryId: incomingHistoryId,
+  //       processingAt: new Date(),
+  //     },
+  //   };
+
+  //   // return the document *before* update so we can know previous historyId
+  //   const prev = await this.gmailStateModel
+  //     .findOneAndUpdate(filter, update, { upsert: true, new: false })
+  //     .lean()
+  //     .exec();
+
+  //   if (!prev && (await this.gmailStateModel.countDocuments({}))) {
+  //     // If prev is null but doc exists, it means our filter didn't match -> either
+  //     // - we've already processed this or a later historyId, or
+  //     // - another worker claimed it.
+  //     this.logger.log(
+  //       `History ${incomingHistoryId} already claimed/processed. skipping.`
+  //     );
+  //     return;
+  //   }
+  //   // prev can be null when upsert created a doc (no previous historyId).
+  //   const previousHistoryId = prev?.historyId;
+  //   this.logger.log(
+  //     `Claimed history ${incomingHistoryId}, previousHistoryId=${previousHistoryId}`
+  //   );
+
+  //   // Now process in try/catch; on error we must reset processing flag so future attempts can handle it
+  //   try {
+  //     let messageIds: string[] = [];
+
+  //     if (previousHistoryId) {
+  //       // normal path: we have a previous historyId -> ask history.list for changes
+  //       const historyRes = await gmail.users.history.list({
+  //         userId: 'me',
+  //         startHistoryId: previousHistoryId,
+  //         historyTypes: ['messageAdded'],
+  //       });
+
+  //       const histories = historyRes?.data?.history || [];
+  //       messageIds = histories
+  //         .flatMap((h: any) =>
+  //           (h.messagesAdded || []).map((ma: any) => ma.message?.id)
+  //         )
+  //         .filter(Boolean);
+  //     } else {
+  //       // No previous history => first run (maybe we didn't seed it when registering the watch).
+  //       // Fallback: list unread messages (safer than trying to iterate histories from unknown start)
+  //       const listRes = await gmail.users.messages.list({
+  //         userId: 'me',
+  //         q: 'is:unread',
+  //       });
+  //       messageIds = (listRes?.data?.messages || []).map((m: any) => m.id);
+  //     }
+
+  //     // Deduplicate message IDs
+  //     messageIds = Array.from(new Set(messageIds));
+  //     this.logger.log(`✌️newMessageIds ---> ${JSON.stringify(messageIds)}`);
+  //     if (!messageIds.length) {
+  //       this.logger.log('No new message IDs found for this history window');
+  //     }
+
+  //     // Process each messageId. Use ProcessedMessage collection with unique index to avoid duplicates.
+  //     for (const msgId of messageIds) {
+  //       // ensure we only process each message id once
+  //       try {
+  //         await this.processedMessageModel.create({ messageId: msgId });
+  //       } catch (err) {
+  //         // duplicate key means another worker/process already processed this message -> skip
+  //         if ((err as any).code === 11000) {
+  //           this.logger.log(`Message ${msgId} already processed, skipping`);
+  //           continue;
+  //         }
+  //         throw err; // unexpected DB error
+  //       }
+
+  //       try {
+  //         await this.processMessage(gmail, msgId);
+  //       } catch (err) {
+  //         // If message-specific processing fails, log and continue with other messages.
+  //         this.logger.error(
+  //           `Error processing message ${msgId}: ${err?.stack || err?.message || err}`
+  //         );
+  //         // optionally: record failed message to a "failed" collection
+  //       }
+  //     }
+
+  //     // success -> mark historyId as processed and clear processing flag
+  //     await this.gmailStateModel
+  //       .updateOne(
+  //         { processingHistoryId: incomingHistoryId },
+  //         {
+  //           $set: { historyId: incomingHistoryId, processing: false },
+  //           $unset: { processingHistoryId: 1, processingAt: 1 },
+  //         }
+  //       )
+  //       .exec();
+
+  //     this.logger.log(`Completed processing for history ${incomingHistoryId}`);
+  //   } catch (err) {
+  //     this.logger.error(
+  //       'Processing failed: ' + (err?.stack || err?.message || err)
+  //     );
+  //     // reset processing flag to allow retry later
+  //     await this.gmailStateModel
+  //       .updateOne(
+  //         { processingHistoryId: incomingHistoryId },
+  //         {
+  //           $unset: { processingHistoryId: 1, processingAt: 1 },
+  //           $set: { processing: false },
+  //         }
+  //       )
+  //       .exec();
+  //     // rethrow so controller can log (but controller will still return 200)
+  //     throw err;
+  //   }
+  // }
+
   async handlePushHistoryId(incomingHistoryId: string) {
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
-
     this.logger.log(`Incoming historyId ${incomingHistoryId}`);
 
-    // 1) atomically claim this historyId for processing
-    const filter = {
-      _id: "gmail_state",
-      $or: [
-        { historyId: { $exists: false } }, // first-time
-        {
-          $and: [
+    const MAX_ATTEMPTS = 6;
+    let attempt = 0;
+    let claimed = false;
+    let previousHistoryId: string | undefined;
+
+    while (attempt < MAX_ATTEMPTS && !claimed) {
+      attempt++;
+
+      // 1) Try to read existing singleton doc (if any)
+      const existing = await this.gmailStateModel
+        .findById("gmail_state")
+        .lean()
+        .exec();
+
+      if (existing) {
+        // If we've already processed or a newer history exists -> skip
+        if (existing.historyId && existing.historyId >= incomingHistoryId) {
+          this.logger.log(
+            `History ${incomingHistoryId} <= stored historyId ${existing.historyId}. skipping.`,
+          );
+          return;
+        }
+        // If already being processed -> skip
+        if (existing.processing) {
+          this.logger.log(
+            `History ${incomingHistoryId} - another worker is processing. skipping.`,
+          );
+          return;
+        }
+
+        // Save previousHistoryId for history.list later
+        previousHistoryId = existing.historyId;
+
+        // Attempt to atomically claim by updating only if processing is not true and the stored historyId is still less
+        const claimFilter = {
+          _id: "gmail_state",
+          processing: { $ne: true },
+          $or: [
+            { historyId: { $exists: false } },
             { historyId: { $lt: incomingHistoryId } },
-            { processing: { $ne: true } },
           ],
-        }, // not already processing and older
-      ],
-    };
+        };
 
-    const update = {
-      $set: {
-        processing: true,
-        processingHistoryId: incomingHistoryId,
-        processingAt: new Date(),
-      },
-    };
+        const claimUpdate = {
+          $set: {
+            processing: true,
+            processingHistoryId: incomingHistoryId,
+            processingAt: new Date(),
+          },
+        };
 
-    // return the document *before* update so we can know previous historyId
-    const prev = await this.gmailStateModel
-      .findOneAndUpdate(filter, update, { upsert: true, new: false })
-      .lean()
-      .exec();
+        const res: any = await this.gmailStateModel
+          .updateOne(claimFilter, claimUpdate)
+          .exec();
 
-    if (!prev && (await this.gmailStateModel.countDocuments({}))) {
-      // If prev is null but doc exists, it means our filter didn't match -> either
-      // - we've already processed this or a later historyId, or
-      // - another worker claimed it.
+        // If matchedCount or modifiedCount > 0, we claimed the doc
+        if (res && (res.matchedCount > 0 || res.modifiedCount > 0)) {
+          claimed = true;
+          break;
+        }
+
+        // otherwise some other process won the race — small backoff and retry
+        this.logger.debug(
+          `Attempt ${attempt}: failed to claim existing gmail_state (race). retrying...`,
+        );
+        await sleep(50 * attempt);
+        continue;
+      } else {
+        // No existing doc -> attempt to insert one (claims it)
+        try {
+          await this.gmailStateModel.create({
+            _id: "gmail_state",
+            // historyId: undefined,
+            processing: true,
+            processingHistoryId: incomingHistoryId,
+            processingAt: new Date(),
+          });
+          // created and claimed
+          previousHistoryId = undefined;
+          claimed = true;
+          break;
+        } catch (err: any) {
+          if (isDupKeyError(err)) {
+            // someone else inserted concurrently — small backoff and retry the loop to read and claim
+            this.logger.debug(
+              `Attempt ${attempt}: duplicate key on create (another process created gmail_state). retrying...`,
+            );
+            await sleep(50 * attempt);
+            continue;
+          }
+          // unexpected DB error
+          throw err;
+        }
+      }
+    } // end while claim attempts
+
+    if (!claimed) {
       this.logger.log(
-        `History ${incomingHistoryId} already claimed/processed. skipping.`,
+        `Failed to claim history ${incomingHistoryId} after ${MAX_ATTEMPTS} attempts; skipping.`,
       );
       return;
     }
-    // prev can be null when upsert created a doc (no previous historyId).
-    const previousHistoryId = prev?.historyId;
+
     this.logger.log(
       `Claimed history ${incomingHistoryId}, previousHistoryId=${previousHistoryId}`,
     );
 
-    // Now process in try/catch; on error we must reset processing flag so future attempts can handle it
+    // --- Now the original processing logic (unchanged) ---
     try {
       let messageIds: string[] = [];
 
       if (previousHistoryId) {
-        // normal path: we have a previous historyId -> ask history.list for changes
         const historyRes = await gmail.users.history.list({
           userId: "me",
           startHistoryId: previousHistoryId,
           historyTypes: ["messageAdded"],
         });
-
         const histories = historyRes?.data?.history || [];
         messageIds = histories
           .flatMap((h: any) =>
@@ -244,8 +454,6 @@ export class GmailService {
           )
           .filter(Boolean);
       } else {
-        // No previous history => first run (maybe we didn't seed it when registering the watch).
-        // Fallback: list unread messages (safer than trying to iterate histories from unknown start)
         const listRes = await gmail.users.messages.list({
           userId: "me",
           q: "is:unread",
@@ -253,42 +461,40 @@ export class GmailService {
         messageIds = (listRes?.data?.messages || []).map((m: any) => m.id);
       }
 
-      // Deduplicate message IDs
       messageIds = Array.from(new Set(messageIds));
       this.logger.log(`✌️newMessageIds ---> ${JSON.stringify(messageIds)}`);
       if (!messageIds.length) {
         this.logger.log("No new message IDs found for this history window");
       }
 
-      // Process each messageId. Use ProcessedMessage collection with unique index to avoid duplicates.
       for (const msgId of messageIds) {
-        // ensure we only process each message id once
         try {
           await this.processedMessageModel.create({ messageId: msgId });
-        } catch (err) {
-          // duplicate key means another worker/process already processed this message -> skip
-          if ((err as any).code === 11000) {
+        } catch (err: any) {
+          if (isDupKeyError(err)) {
             this.logger.log(`Message ${msgId} already processed, skipping`);
             continue;
           }
-          throw err; // unexpected DB error
+          throw err;
         }
 
         try {
           await this.processMessage(gmail, msgId);
         } catch (err) {
-          // If message-specific processing fails, log and continue with other messages.
           this.logger.error(
             `Error processing message ${msgId}: ${err?.stack || err?.message || err}`,
           );
-          // optionally: record failed message to a "failed" collection
         }
       }
 
       // success -> mark historyId as processed and clear processing flag
       await this.gmailStateModel
         .updateOne(
-          { processingHistoryId: incomingHistoryId },
+          {
+            _id: "gmail_state",
+            processing: true,
+            processingHistoryId: incomingHistoryId,
+          },
           {
             $set: { historyId: incomingHistoryId, processing: false },
             $unset: { processingHistoryId: 1, processingAt: 1 },
@@ -304,14 +510,17 @@ export class GmailService {
       // reset processing flag to allow retry later
       await this.gmailStateModel
         .updateOne(
-          { processingHistoryId: incomingHistoryId },
+          {
+            _id: "gmail_state",
+            processing: true,
+            processingHistoryId: incomingHistoryId,
+          },
           {
             $unset: { processingHistoryId: 1, processingAt: 1 },
             $set: { processing: false },
           },
         )
         .exec();
-      // rethrow so controller can log (but controller will still return 200)
       throw err;
     }
   }
