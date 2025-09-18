@@ -668,7 +668,8 @@ export class MaintenanceRecordsService {
         // Send onboarding email with credentials
         if (
           process.env.APP_ENV === AppEnvironment.DEVELOPMENT ||
-          process.env.APP_ENV === AppEnvironment.PRODUCTION
+          process.env.APP_ENV === AppEnvironment.PRODUCTION ||
+          process.env.APP_ENV === AppEnvironment.STAGING
         ) {
           const resultFile = await this.imageService.uploadS3(
             buffer,

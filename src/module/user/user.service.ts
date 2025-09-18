@@ -328,7 +328,8 @@ export class UserService {
       // Send onboarding email with credentials
       if (
         process.env.APP_ENV === AppEnvironment.DEVELOPMENT ||
-        process.env.APP_ENV === AppEnvironment.PRODUCTION
+        process.env.APP_ENV === AppEnvironment.PRODUCTION ||
+        process.env.APP_ENV === AppEnvironment.STAGING
       ) {
         await this.emailService.emailSender({
           to: email,

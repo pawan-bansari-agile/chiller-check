@@ -242,7 +242,11 @@ export class AuthService {
         deviceId: params.deviceId,
       });
 
-      if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
+      if (
+        process.env.APP_ENV === AppEnvironment.DEVELOPMENT ||
+        process.env.APP_ENV === AppEnvironment.STAGING ||
+        process.env.APP_ENV === AppEnvironment.PRODUCTION
+      ) {
         if (!existingDevice) {
           // 🚀 Device not found, trigger OTP
           // let otpResult;
@@ -332,7 +336,11 @@ export class AuthService {
       const masterOTP = process.env.MASTER_OTP;
 
       if (body.otp !== masterOTP) {
-        if (process.env.APP_ENV === AppEnvironment.DEVELOPMENT) {
+        if (
+          process.env.APP_ENV === AppEnvironment.DEVELOPMENT ||
+          process.env.APP_ENV === AppEnvironment.STAGING ||
+          process.env.APP_ENV === AppEnvironment.PRODUCTION
+        ) {
           const otpVerifyResult = await verifyOTP(
             body.otp,
             user.phoneNumber,
@@ -588,7 +596,8 @@ export class AuthService {
 
       if (
         process.env.APP_ENV === AppEnvironment.DEVELOPMENT ||
-        process.env.APP_ENV === AppEnvironment.PRODUCTION
+        process.env.APP_ENV === AppEnvironment.PRODUCTION ||
+        process.env.APP_ENV === AppEnvironment.STAGING
       ) {
         await new EmailService().emailSender({
           to: user.email.toLowerCase(),

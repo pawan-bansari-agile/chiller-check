@@ -40,7 +40,8 @@ export class EmailService {
       // } else
       if (
         process.env.APP_ENV === AppEnvironment.PRODUCTION ||
-        process.env.APP_ENV === AppEnvironment.DEVELOPMENT
+        process.env.APP_ENV === AppEnvironment.DEVELOPMENT ||
+        process.env.APP_ENV === AppEnvironment.STAGING
       ) {
         return await this.sesMail(options);
       } else {
