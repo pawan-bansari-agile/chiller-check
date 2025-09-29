@@ -18,6 +18,10 @@ import {
 import { Device, DeviceSchema } from "src/common/schema/device.schema";
 import { Chiller, ChillerSchema } from "src/common/schema/chiller.schema";
 import { Facility, FacilitySchema } from "src/common/schema/facility.schema";
+import { ReportsService } from "src/module/reports/reports.service";
+import { Report, ReportSchema } from "src/common/schema/reports.schema";
+import { ImageUploadService } from "src/module/image-upload/image-upload.service";
+import { CommonService } from "src/common/services/common.service";
 
 @Module({
   imports: [
@@ -30,12 +34,20 @@ import { Facility, FacilitySchema } from "src/common/schema/facility.schema";
       { name: Facility.name, schema: FacilitySchema },
       { name: Notification.name, schema: NotificationSchema },
       { name: Device.name, schema: DeviceSchema },
+      { name: Report.name, schema: ReportSchema },
       {
         name: MaintenanceRecordsLogs.name,
         schema: MaintenanceRecordsLogsSchema,
       },
     ]),
   ],
-  providers: [AlertCronService, NotificationService, EmailService],
+  providers: [
+    AlertCronService,
+    NotificationService,
+    EmailService,
+    ReportsService,
+    ImageUploadService,
+    CommonService,
+  ],
 })
 export class AlertCronModule {}

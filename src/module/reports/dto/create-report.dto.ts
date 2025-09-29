@@ -1,15 +1,33 @@
 import { ApiProperty, PartialType } from "@nestjs/swagger";
+import { Type } from "class-transformer";
 import {
   IsArray,
   IsEnum,
+  IsMongoId,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  ValidateNested,
 } from "class-validator";
 import { Role } from "src/common/constants/enum.constant";
 import { ChartType, DateType, ParameterType } from "src/common/dto/common.dto";
 import { NotificationType } from "src/module/user/dto/user.dto";
+
+export class SharedToDto {
+  @ApiProperty({ description: "User ID to share the report with" })
+  @IsNotEmpty()
+  @IsMongoId()
+  userId: string;
+
+  @ApiProperty({
+    description: "Report interval for scheduled generation",
+    enum: ["daily", "weekly", "monthly"],
+  })
+  @IsNotEmpty()
+  @IsEnum(["daily", "weekly", "monthly"])
+  interval: "daily" | "weekly" | "monthly";
+}
 
 export class CreateReportDto {
   @ApiProperty({ description: "Name of the report" })
@@ -18,12 +36,12 @@ export class CreateReportDto {
   name: string;
 
   @ApiProperty({ description: "Start date" })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   startDate: string;
 
   @ApiProperty({ description: "End date" })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   endDate: string;
 
@@ -82,11 +100,21 @@ export class CreateReportDto {
   @IsString()
   footer: string;
 
-  @ApiProperty({ type: [String], description: "Array of User IDs" })
+  // @ApiProperty({ type: [String], description: 'Array of User IDs' })
+  // // @IsArray()
+  // // @IsNotEmpty()
+  // // @IsMongoId({ each: true })
+  // sharedTo: string[];
+  @ApiProperty({
+    type: [SharedToDto],
+    description: "Array of users with interval settings",
+    required: false,
+  })
+  @IsOptional()
   // @IsArray()
-  // @IsNotEmpty()
-  // @IsMongoId({ each: true })
-  sharedTo: string[];
+  @ValidateNested({ each: true })
+  @Type(() => SharedToDto)
+  sharedTo?: SharedToDto[];
 
   @ApiProperty({ description: "The ID Of the Creator User" })
   @IsOptional()

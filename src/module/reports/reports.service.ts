@@ -30,10 +30,15 @@ import { reportNotificationTemplate } from "src/common/helpers/email/emailTempla
 import { EmailService } from "src/common/helpers/email/email.service";
 import { TABLE_NAMES } from "src/common/constants/table-name.constant";
 import { NotificationService } from "src/common/services/notification.service";
-import { ParameterType } from "src/common/dto/common.dto";
+import { DateType, ParameterType } from "src/common/dto/common.dto";
 import { Workbook } from "exceljs";
 import * as fs from "fs";
 import { ImageUploadService } from "../image-upload/image-upload.service";
+import {
+  // DateRange,
+  getStartEndDates,
+} from "src/common/helpers/reports/dateSetter.helper";
+import * as dayjs from "dayjs";
 
 @Injectable()
 export class ReportsService {
@@ -63,8 +68,6 @@ export class ReportsService {
 
       const {
         name,
-        startDate,
-        endDate,
         notification,
         parameter,
         chartType,
@@ -76,6 +79,39 @@ export class ReportsService {
         dateType,
         sharedTo,
       } = createReportDto;
+
+      let { startDate, endDate } = createReportDto;
+
+      const dateRange = getStartEndDates(dateType);
+      if (dateType === DateType["Custom Range"]) {
+        if (!startDate || !endDate) {
+          throw TypeExceptions.BadRequestCommonFunction(
+            "Start date and End date are required for Custom Range",
+          );
+        }
+        // Normalize custom range inputs
+        startDate = dayjs(startDate)
+          .startOf("day")
+          .format("YYYY-MM-DDTHH:mm:ss.SSS[Z]");
+        endDate = dayjs(endDate)
+          .endOf("day")
+          .format("YYYY-MM-DDTHH:mm:ss.SSS[Z]");
+
+        if (dayjs(startDate).isAfter(dayjs(endDate))) {
+          throw TypeExceptions.BadRequestCommonFunction(
+            "Start date cannot be after End date",
+          );
+        }
+      } else {
+        // Use derived range and ignore any input dates
+        if (!dateRange) {
+          throw TypeExceptions.BadRequestCommonFunction(
+            `Invalid dateType provided: ${dateType}`,
+          );
+        }
+        startDate = dateRange.startDate;
+        endDate = dateRange.endDate;
+      }
 
       const userRole = loggedInUser.role;
       const userCompanyId = loggedInUser.companyId?.toString();
@@ -127,6 +163,11 @@ export class ReportsService {
         }
       }
 
+      const sharedToDocs = (sharedTo || []).map((entry) => ({
+        userId: new mongoose.Types.ObjectId(entry.userId),
+        interval: entry.interval,
+      }));
+
       // ✅ Save report
       const report = await this.reportModel.create({
         name,
@@ -141,7 +182,8 @@ export class ReportsService {
         description,
         header,
         footer,
-        sharedTo: sharedTo?.map((id) => new mongoose.Types.ObjectId(id)),
+        // sharedTo: sharedTo?.map((id) => new mongoose.Types.ObjectId(id)),
+        sharedTo: sharedToDocs,
         createdBy: new mongoose.Types.ObjectId(loggedInUser._id),
         updatedBy: new mongoose.Types.ObjectId(loggedInUser._id),
       });
@@ -149,7 +191,7 @@ export class ReportsService {
       if (sharedTo.length != 0) {
         sharedTo.map(async (id) => {
           const user = await this.userModel.findById({
-            _id: new mongoose.Types.ObjectId(id),
+            _id: new mongoose.Types.ObjectId(id.userId),
           });
 
           const userFullName = `${user.firstName} ${user.lastName}`;
@@ -415,6 +457,234 @@ export class ReportsService {
     }
   }
 
+  // async findOne(id: string, loggedInUserId: string) {
+  //   try {
+  //     const loggedInUser = await this.userModel.findById({
+  //       _id: new mongoose.Types.ObjectId(loggedInUserId),
+  //     });
+
+  //     if (!loggedInUser) {
+  //       throw TypeExceptions.BadRequestCommonFunction(
+  //         RESPONSE_ERROR.UNAUTHORIZED_USER
+  //       );
+  //     }
+  //     const report = await this.reportModel.findOne({
+  //       _id: new mongoose.Types.ObjectId(id),
+  //     });
+  //     // Check access: user must be the creator or in shared users
+  //     const userIdStr = String(loggedInUser._id);
+  //     const isCreator = String(report.createdBy) === userIdStr;
+  //     const isShared = report.sharedTo?.some(
+  //       (sharedId) => String(sharedId) === userIdStr
+  //     );
+
+  //     if (!isCreator && !isShared) {
+  //       throw TypeExceptions.BadRequestCommonFunction(
+  //         REPORTS.USER_NOT_ACCESS_REPORT
+  //       );
+  //     }
+  //     const matchObj: FilterQuery<ReportDocument> = {
+  //       _id: new mongoose.Types.ObjectId(id),
+  //       isDeleted: false,
+  //       // sharedTo: { $in: [new mongoose.Types.ObjectId(loggedInUserId)] },
+  //     };
+
+  //     const pipeline = [];
+
+  //     pipeline.push({ $match: matchObj });
+
+  //     pipeline.push({
+  //       $lookup: {
+  //         from: TABLE_NAMES.COMPANY,
+  //         localField: 'companyId',
+  //         foreignField: '_id',
+  //         as: 'company',
+  //       },
+  //     });
+
+  //     pipeline.push({
+  //       $unwind: { path: '$company', preserveNullAndEmptyArrays: true },
+  //     });
+
+  //     pipeline.push({
+  //       $lookup: {
+  //         from: TABLE_NAMES.FACILITY,
+  //         localField: 'facilityIds',
+  //         foreignField: '_id',
+  //         as: 'facility',
+  //       },
+  //     });
+
+  //     pipeline.push({
+  //       $unwind: { path: '$sharedTo', preserveNullAndEmptyArrays: true },
+  //     });
+  //     pipeline.push({
+  //       $lookup: {
+  //         from: TABLE_NAMES.USERS,
+  //         localField: 'sharedTo.userId',
+  //         foreignField: '_id',
+  //         as: 'sharedUser',
+  //         pipeline: [
+  //           {
+  //             $match: {
+  //               _id: { $ne: new mongoose.Types.ObjectId(loggedInUserId) },
+  //               // companyId: { $ne: null }, // has a company
+  //               // facilityIds: { $exists: true, $ne: [] }, // has facilities,
+  //             },
+  //           },
+  //           {
+  //             $lookup: {
+  //               from: TABLE_NAMES.COMPANY,
+  //               let: { companyId: '$companyId' },
+  //               pipeline: [
+  //                 { $match: { $expr: { $eq: ['$_id', '$$companyId'] } } },
+  //               ],
+  //               as: 'company',
+  //             },
+  //           },
+  //           {
+  //             $unwind: { path: '$company', preserveNullAndEmptyArrays: true },
+  //           },
+  //           {
+  //             $lookup: {
+  //               from: TABLE_NAMES.FACILITY,
+  //               let: { facilityIds: '$facilityIds' },
+  //               pipeline: [
+  //                 { $match: { $expr: { $in: ['$_id', '$$facilityIds'] } } },
+  //               ],
+  //               as: 'facilities',
+  //             },
+  //           },
+  //         ],
+  //       },
+  //     });
+
+  //     pipeline.push({
+  //       $unwind: { path: '$sharedUser', preserveNullAndEmptyArrays: true },
+  //     });
+
+  //     pipeline.push({
+  //       $addFields: {
+  //         'sharedUser.interval': '$sharedTo.interval',
+  //       },
+  //     });
+
+  //     pipeline.push({
+  //       $group: {
+  //         _id: '$_id',
+  //         doc: { $first: '$$ROOT' },
+  //         sharedUser: { $push: '$sharedUser' },
+  //         sharedTo: {
+  //           $push: {
+  //             userId: '$sharedTo.userId',
+  //             interval: '$sharedTo.interval',
+  //           },
+  //         },
+  //       },
+  //     });
+  //     pipeline.push({
+  //       $replaceRoot: {
+  //         newRoot: {
+  //           $mergeObjects: [
+  //             '$doc',
+  //             { sharedUser: '$sharedUser', sharedTo: '$sharedTo' },
+  //           ],
+  //         },
+  //       },
+  //     });
+
+  //     // pipeline.push({
+  //     //   $unwind: { path: '$facility', preserveNullAndEmptyArrays: true },
+  //     // });
+
+  //     pipeline.push({
+  //       $lookup: {
+  //         from: TABLE_NAMES.USERS,
+  //         localField: 'createdBy',
+  //         foreignField: '_id',
+  //         as: 'createdByUser',
+  //       },
+  //     });
+
+  //     pipeline.push({
+  //       $unwind: { path: '$createdByUser', preserveNullAndEmptyArrays: true },
+  //     });
+  //     pipeline.push({
+  //       $lookup: {
+  //         from: TABLE_NAMES.USERS,
+  //         localField: 'updatedBy',
+  //         foreignField: '_id',
+  //         as: 'updatedByUser',
+  //       },
+  //     });
+
+  //     pipeline.push({
+  //       $unwind: { path: '$updatedByUser', preserveNullAndEmptyArrays: true },
+  //     });
+
+  //     // 🧮 Add Fields
+  //     pipeline.push({
+  //       $addFields: {
+  //         facilityNames: {
+  //           $map: {
+  //             input: '$facility',
+  //             as: 'fac',
+  //             in: '$$fac.name',
+  //           },
+  //         },
+  //         companyName: '$company.name',
+  //         updatedByName: {
+  //           $concat: [
+  //             { $ifNull: ['$updatedByUser.firstName', ''] },
+  //             ' ',
+  //             { $ifNull: ['$updatedByUser.lastName', ''] },
+  //           ],
+  //         },
+  //       },
+  //     });
+
+  //     const result = await this.reportModel.aggregate(pipeline);
+
+  //     if (!result || result.length === 0) {
+  //       throw TypeExceptions.BadRequestCommonFunction(
+  //         RESPONSE_ERROR.REPORT_NOT_FOUND
+  //       );
+  //     } else {
+  //       const newShareUser = result[0].sharedUser;
+  //       // const ids = newShareUser?.map?.((data) => data._id);
+  //       const newSharedUserFinal = [];
+  //       for (const element of newShareUser) {
+  //         if (element.role == Role.CORPORATE_MANAGER) {
+  //           if (element.companyId) {
+  //             newSharedUserFinal.push(element);
+  //           }
+  //         }
+  //         if (
+  //           element.role == Role.FACILITY_MANAGER ||
+  //           element.role == Role.OPERATOR
+  //         ) {
+  //           if (element.companyId && element.facilityIds?.length) {
+  //             newSharedUserFinal.push(element);
+  //           }
+  //         }
+  //       }
+  //       // const ids = newSharedUserFinal?.map?.((data) => data._id);
+  //       // const ids = newSharedUserFinal.map((u) => ({
+  //       //   userId: u._id,
+  //       //   interval: u.interval,
+  //       // }));
+
+  //       return {
+  //         ...result[0],
+  //         sharedTo: result[0].sharedTo,
+  //         sharedUser: newSharedUserFinal,
+  //       };
+  //     }
+  //   } catch (error) {
+  //     throw CustomError.UnknownError(error?.message, error?.status);
+  //   }
+  // }
+
   async findOne(id: string, loggedInUserId: string) {
     try {
       const loggedInUser = await this.userModel.findById({
@@ -426,14 +696,15 @@ export class ReportsService {
           RESPONSE_ERROR.UNAUTHORIZED_USER,
         );
       }
+
       const report = await this.reportModel.findOne({
         _id: new mongoose.Types.ObjectId(id),
       });
-      // Check access: user must be the creator or in shared users
+
       const userIdStr = String(loggedInUser._id);
       const isCreator = String(report.createdBy) === userIdStr;
       const isShared = report.sharedTo?.some(
-        (sharedId) => String(sharedId) === userIdStr,
+        (shared) => String(shared.userId) === userIdStr,
       );
 
       if (!isCreator && !isShared) {
@@ -441,16 +712,17 @@ export class ReportsService {
           REPORTS.USER_NOT_ACCESS_REPORT,
         );
       }
-      const matchObj: FilterQuery<ReportDocument> = {
-        _id: new mongoose.Types.ObjectId(id),
-        isDeleted: false,
-        // sharedTo: { $in: [new mongoose.Types.ObjectId(loggedInUserId)] },
-      };
 
       const pipeline = [];
 
-      pipeline.push({ $match: matchObj });
+      pipeline.push({
+        $match: {
+          _id: new mongoose.Types.ObjectId(id),
+          isDeleted: false,
+        },
+      });
 
+      // company lookup
       pipeline.push({
         $lookup: {
           from: TABLE_NAMES.COMPANY,
@@ -459,11 +731,11 @@ export class ReportsService {
           as: "company",
         },
       });
-
       pipeline.push({
         $unwind: { path: "$company", preserveNullAndEmptyArrays: true },
       });
 
+      // facility lookup
       pipeline.push({
         $lookup: {
           from: TABLE_NAMES.FACILITY,
@@ -473,20 +745,18 @@ export class ReportsService {
         },
       });
 
+      // expand sharedTo array
+      pipeline.push({
+        $unwind: { path: "$sharedTo", preserveNullAndEmptyArrays: true },
+      });
+
+      // lookup shared users with company + facility
       pipeline.push({
         $lookup: {
           from: TABLE_NAMES.USERS,
-          localField: "sharedTo",
-          foreignField: "_id",
-          as: "sharedUser",
+          let: { userId: "$sharedTo.userId", interval: "$sharedTo.interval" },
           pipeline: [
-            {
-              $match: {
-                _id: { $ne: new mongoose.Types.ObjectId(loggedInUserId) },
-                // companyId: { $ne: null }, // has a company
-                // facilityIds: { $exists: true, $ne: [] }, // has facilities,
-              },
-            },
+            { $match: { $expr: { $eq: ["$_id", "$$userId"] } } },
             {
               $lookup: {
                 from: TABLE_NAMES.COMPANY,
@@ -497,9 +767,7 @@ export class ReportsService {
                 as: "company",
               },
             },
-            {
-              $unwind: { path: "$company", preserveNullAndEmptyArrays: true },
-            },
+            { $unwind: { path: "$company", preserveNullAndEmptyArrays: true } },
             {
               $lookup: {
                 from: TABLE_NAMES.FACILITY,
@@ -510,14 +778,43 @@ export class ReportsService {
                 as: "facilities",
               },
             },
+            // attach interval from sharedTo
+            {
+              $addFields: {
+                interval: "$$interval",
+              },
+            },
           ],
+          as: "sharedUser",
         },
       });
 
-      // pipeline.push({
-      //   $unwind: { path: '$facility', preserveNullAndEmptyArrays: true },
-      // });
+      pipeline.push({
+        $unwind: { path: "$sharedUser", preserveNullAndEmptyArrays: true },
+      });
 
+      // regroup everything
+      pipeline.push({
+        $group: {
+          _id: "$_id",
+          doc: { $first: "$$ROOT" },
+          sharedUser: { $push: "$sharedUser" },
+          sharedTo: { $push: "$sharedTo" },
+        },
+      });
+
+      pipeline.push({
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: [
+              "$doc",
+              { sharedUser: "$sharedUser", sharedTo: "$sharedTo" },
+            ],
+          },
+        },
+      });
+
+      // createdBy lookup
       pipeline.push({
         $lookup: {
           from: TABLE_NAMES.USERS,
@@ -526,10 +823,11 @@ export class ReportsService {
           as: "createdByUser",
         },
       });
-
       pipeline.push({
         $unwind: { path: "$createdByUser", preserveNullAndEmptyArrays: true },
       });
+
+      // updatedBy lookup
       pipeline.push({
         $lookup: {
           from: TABLE_NAMES.USERS,
@@ -538,12 +836,11 @@ export class ReportsService {
           as: "updatedByUser",
         },
       });
-
       pipeline.push({
         $unwind: { path: "$updatedByUser", preserveNullAndEmptyArrays: true },
       });
 
-      // 🧮 Add Fields
+      // add computed fields
       pipeline.push({
         $addFields: {
           facilityNames: {
@@ -570,32 +867,15 @@ export class ReportsService {
         throw TypeExceptions.BadRequestCommonFunction(
           RESPONSE_ERROR.REPORT_NOT_FOUND,
         );
-      } else {
-        const newShareUser = result[0].sharedUser;
-        // const ids = newShareUser?.map?.((data) => data._id);
-        const newSharedUserFinal = [];
-        for (const element of newShareUser) {
-          if (element.role == Role.CORPORATE_MANAGER) {
-            if (element.companyId) {
-              newSharedUserFinal.push(element);
-            }
-          }
-          if (
-            element.role == Role.FACILITY_MANAGER ||
-            element.role == Role.OPERATOR
-          ) {
-            if (element.companyId && element.facilityIds?.length) {
-              newSharedUserFinal.push(element);
-            }
-          }
-        }
-        const ids = newSharedUserFinal?.map?.((data) => data._id);
-        return { ...result[0], sharedTo: ids, sharedUser: newSharedUserFinal };
       }
+
+      // 🔹 No role-based filtering now → return ALL shared users
+      return result[0];
     } catch (error) {
       throw CustomError.UnknownError(error?.message, error?.status);
     }
   }
+
   async getGroupFormat(startDate: Date, endDate: Date) {
     const diffDays =
       (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
@@ -1100,18 +1380,58 @@ export class ReportsService {
       }
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { updatedBy, ...updatableFields } = updateReportDto;
+      const { updatedBy, dateType, ...updatableFields } = updateReportDto;
+
+      let { startDate, endDate } = updateReportDto;
+
+      const dateRange = getStartEndDates(dateType);
+      if (dateType === DateType["Custom Range"]) {
+        if (!startDate || !endDate) {
+          throw TypeExceptions.BadRequestCommonFunction(
+            "Start date and End date are required for Custom Range",
+          );
+        }
+        // Normalize custom range inputs
+        startDate = dayjs(startDate)
+          .startOf("day")
+          .format("YYYY-MM-DDTHH:mm:ss.SSS[Z]");
+        endDate = dayjs(endDate)
+          .endOf("day")
+          .format("YYYY-MM-DDTHH:mm:ss.SSS[Z]");
+
+        if (dayjs(startDate).isAfter(dayjs(endDate))) {
+          throw TypeExceptions.BadRequestCommonFunction(
+            "Start date cannot be after End date",
+          );
+        }
+      } else {
+        // Use derived range and ignore any input dates
+        if (!dateRange) {
+          throw TypeExceptions.BadRequestCommonFunction(
+            `Invalid dateType provided: ${dateType}`,
+          );
+        }
+        startDate = dateRange.startDate;
+        endDate = dateRange.endDate;
+      }
 
       Object.assign(report, updatableFields);
+      report.startDate = startDate;
+      report.endDate = endDate;
+
       (report.companyId = new mongoose.Types.ObjectId(
         updatableFields.companyId,
       )),
         (report.facilityIds = updatableFields?.facilityIds.map(
           (id) => new mongoose.Types.ObjectId(id),
         )),
-        (report.sharedTo = updatableFields?.sharedTo?.map(
-          (id) => new mongoose.Types.ObjectId(id),
-        )),
+        // (report.sharedTo = updatableFields?.sharedTo?.map(
+        //   (id) => new mongoose.Types.ObjectId(id.userId),
+        // ))
+        (report.sharedTo = updatableFields?.sharedTo.map((item) => ({
+          userId: new mongoose.Types.ObjectId(item.userId),
+          interval: item.interval,
+        }))),
         (report.updatedBy = new mongoose.Types.ObjectId(loggedInUser._id)),
         await report.save();
 

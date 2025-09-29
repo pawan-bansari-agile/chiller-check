@@ -51,12 +51,31 @@ export class Report {
   @Prop()
   dateType: string;
 
+  // @Prop({
+  //   required: false,
+  //   type: [mongoose.Types.ObjectId],
+  //   // ref: Departments.name,
+  // })
+  // sharedTo: mongoose.Types.ObjectId[];
   @Prop({
     required: false,
-    type: [mongoose.Types.ObjectId],
-    // ref: Departments.name,
+    type: [
+      {
+        _id: false,
+        userId: { type: mongoose.Types.ObjectId, ref: "User", required: true },
+        interval: {
+          type: String,
+          enum: ["daily", "weekly", "monthly"],
+          required: true,
+        },
+      },
+    ],
+    default: undefined,
   })
-  sharedTo: mongoose.Types.ObjectId[];
+  sharedTo?: {
+    userId: mongoose.Types.ObjectId;
+    interval: "daily" | "weekly" | "monthly";
+  }[];
 
   @Prop({ required: true, type: mongoose.Types.ObjectId, ref: "User" })
   createdBy: mongoose.Types.ObjectId;

@@ -3,7 +3,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { InjectModel } from "@nestjs/mongoose";
-import { Model } from "mongoose";
+import mongoose, { Model } from "mongoose";
 
 import { NotificationType, LogEntryAlert } from "src/module/user/dto/user.dto";
 import { User, UserDocument } from "src/common/schema/user.schema";
@@ -12,12 +12,20 @@ import {
   MaintenanceDocument,
   MaintenanceRecordsLogs,
 } from "src/common/schema/maintenanceLogs.schema";
-import { Role, userRoleName } from "src/common/constants/enum.constant";
+import {
+  NotificationRedirectionType,
+  Role,
+  userRoleName,
+} from "src/common/constants/enum.constant";
 import { NotificationService } from "src/common/services/notification.service";
 import { EmailService } from "src/common/helpers/email/email.service";
 import { Chiller, ChillerDocument } from "src/common/schema/chiller.schema";
 import { Facility, FacilityDocument } from "src/common/schema/facility.schema";
 import { logAlertTemplate } from "src/common/helpers/email/emailTemplates/logAlertTemplate";
+import { Report, ReportDocument } from "src/common/schema/reports.schema";
+import { getStartEndDates } from "src/common/helpers/reports/dateSetter.helper";
+import { ReportsService } from "src/module/reports/reports.service";
+import { reportNotificationTemplate } from "src/common/helpers/email/emailTemplates/reportNotificationTemplate";
 
 @Injectable()
 export class AlertCronService {
@@ -28,10 +36,12 @@ export class AlertCronService {
     @InjectModel(Logs.name) private logsModel: Model<LogsDocument>,
     @InjectModel(Chiller.name) private chillerModel: Model<ChillerDocument>,
     @InjectModel(Facility.name) private facilityModel: Model<FacilityDocument>,
+    @InjectModel(Report.name) private reportModel: Model<ReportDocument>,
     @InjectModel(MaintenanceRecordsLogs.name)
     private maintModel: Model<MaintenanceDocument>,
     private notificationService: NotificationService,
     private emailService: EmailService,
+    private reportsService: ReportsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
@@ -281,5 +291,165 @@ export class AlertCronService {
       subject: content.title,
       html,
     });
+  }
+
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async processSharedReports() {
+    this.logger.log("Running daily shared reports cron job...");
+
+    const reports = await this.reportModel.find({ isDeleted: false }).lean();
+
+    for (const report of reports) {
+      if (!report.sharedTo?.length) continue;
+
+      for (const shared of report.sharedTo) {
+        const shouldGenerate = this.shouldGenerateToday(shared.interval);
+        if (!shouldGenerate) continue;
+
+        await this.notifySharedUser(report, shared.userId);
+      }
+    }
+  }
+
+  private shouldGenerateToday(
+    interval: "daily" | "weekly" | "monthly",
+  ): boolean {
+    const today = new Date();
+
+    if (interval === "daily") return true;
+    if (interval === "weekly") return today.getDay() === 1; // e.g. Monday
+    if (interval === "monthly") return today.getDate() === 1; // 1st of month
+
+    return false;
+  }
+
+  // private async generateAndNotify(
+  //   report: any,
+  //   userId: mongoose.Types.ObjectId,
+  // ) {
+  //   // fetch user
+  //   const user = await this.userModel.findById(userId);
+  //   if (!user) return;
+
+  //   const { startDate, endDate } = getStartEndDates(report.dateType);
+
+  //   const reportPayload = {
+  //     name: report.name,
+  //     notification: report.notification,
+  //     parameter: report.parameter,
+  //     chartType: report.chartType,
+  //     companyId: report.companyId,
+  //     facilityIds: report.facilityIds,
+  //     description: report.description,
+  //     header: report.header,
+  //     footer: report.footer,
+  //     startDate: startDate,
+  //     endDate: endDate,
+  //     dateType: report.dateType,
+  //     sharedTo: [],
+  //     createdBy: report.createdBy,
+  //     updatedBy: report.createdBy,
+  //   };
+
+  //   // create new report (copy details)
+  //   const newReport = await this.reportsService.create(
+  //     reportPayload,
+  //     report.createdBy.toString(),
+  //   );
+
+  //   // send notification
+  //   const userFullName = `${user.firstName} ${user.lastName}`;
+  //   const creator = await this.userModel.findById(report.createdBy);
+  //   console.log("✌️creator --->", creator);
+
+  //   if (report.notification === "email" || report.notification === "both") {
+  //     const html = reportNotificationTemplate(
+  //       userFullName,
+  //       newReport.name,
+  //       creator?.role,
+  //       `${creator?.firstName} ${creator?.lastName}`,
+  //       `${process.env.ADMIN_URL}/report/view/${newReport._id}`,
+  //     );
+  //     console.log("✌️process.env.ADMIN_URL --->", process.env.ADMIN_URL);
+
+  //     console.log("✌️user.email --->", user.email);
+  //     await this.emailService.emailSender({
+  //       to: user.email,
+  //       subject: `Your Scheduled Report`,
+  //       html: html,
+  //     });
+  //   }
+
+  //   if (report.notification === "web" || report.notification === "both") {
+  //     const message = `Your scheduled report "${newReport.name}" is now available.`;
+  //     const payload = {
+  //       senderId: null,
+  //       receiverId: user._id,
+  //       title: "Scheduled Report",
+  //       message: message,
+  //       type: NotificationRedirectionType.REPORT_SHARED,
+  //       redirection: {
+  //         reportId: newReport._id,
+  //         type: NotificationRedirectionType.REPORT_SHARED,
+  //       },
+  //     };
+
+  //     await this.notificationService.sendNotification(
+  //       payload.receiverId,
+  //       payload,
+  //     );
+  //   }
+
+  //   this.logger.log(`Generated report ${newReport._id} for user ${user.email}`);
+  // }
+  private async notifySharedUser(report: any, userId: mongoose.Types.ObjectId) {
+    // fetch user
+    const user = await this.userModel.findById(userId);
+    if (!user) return;
+
+    const userFullName = `${user.firstName} ${user.lastName}`;
+    const creator = await this.userModel.findById(report.createdBy);
+
+    // 📧 Email Notification
+    if (report.notification === "email" || report.notification === "both") {
+      const html = reportNotificationTemplate(
+        userFullName,
+        report.name,
+        creator?.role,
+        `${creator?.firstName} ${creator?.lastName}`,
+        `${process.env.ADMIN_URL}/report/view/${report._id}`, // ✅ use existing report id
+      );
+
+      await this.emailService.emailSender({
+        to: user.email,
+        subject: `Your Scheduled Report`,
+        html: html,
+      });
+    }
+
+    // 🔔 Web Notification
+    if (report.notification === "web" || report.notification === "both") {
+      const message = `Your scheduled report "${report.name}" is now available.`;
+      const payload = {
+        senderId: null,
+        receiverId: user._id,
+        title: "Scheduled Report",
+        message: message,
+        type: NotificationRedirectionType.REPORT_SHARED,
+        redirection: {
+          reportId: report._id,
+          type: NotificationRedirectionType.REPORT_SHARED,
+        },
+      };
+
+      await this.notificationService.sendNotification(
+        payload.receiverId,
+        payload,
+      );
+    }
+
+    this.logger.log(
+      `Sent notification for report ${report._id} to ${user.email}`,
+    );
   }
 }
